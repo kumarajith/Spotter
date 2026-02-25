@@ -80,5 +80,11 @@ export async function handleActivityButton(interaction) {
     reply += '\n' + messages.join('\n');
   }
 
-  return interaction.reply({ content: reply, flags: 64 });
+  await interaction.reply({ content: reply, flags: 64 });
+
+  // Public message so others can see
+  const display = activity.emoji ? `${activity.emoji} ${activity.name}` : activity.name;
+  await interaction.channel.send(
+    `<@${userId}> logged **${display}** — **${currentStreak}-day** streak 🔥`
+  );
 }

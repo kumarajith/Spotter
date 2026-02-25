@@ -5,6 +5,7 @@ const DEFAULT_ACTIVITIES = [
   { emoji: '🫷', name: 'Pull' },
   { emoji: '⬇️', name: 'Lower' },
   { emoji: '⬆️', name: 'Upper' },
+  { emoji: '🔥', name: 'Abs' },
   { emoji: '🚶', name: 'Walk' },
   { emoji: '😴', name: 'Rest' },
 ];
