@@ -1,0 +1,15 @@
+import { SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
+import { runDailyTasks } from '../scheduler.js';
+
+export const data = new SlashCommandBuilder()
+  .setName('trigger')
+  .setDescription('Manually trigger the daily scheduled tasks (panel repost + streak summary)')
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels);
+
+export async function execute(interaction) {
+  await interaction.deferReply({ flags: 64 });
+
+  await runDailyTasks(interaction.client);
+
+  await interaction.editReply('✅ Daily tasks triggered — panel reposted and streak summary sent.');
+}
