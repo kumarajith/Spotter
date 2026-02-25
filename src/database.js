@@ -61,7 +61,7 @@ const stmts = {
     `SELECT * FROM activities WHERE guild_id = ? AND is_default = 0 ORDER BY id ASC`
   ),
   deleteActivity: db.prepare(
-    `DELETE FROM activities WHERE guild_id = ? AND name = ? COLLATE NOCASE AND is_default = 0`
+    `DELETE FROM activities WHERE guild_id = ? AND name = ? COLLATE NOCASE`
   ),
   deleteActivityLogs: db.prepare(
     `DELETE FROM activity_logs WHERE activity_id = ?`

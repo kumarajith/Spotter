@@ -1,5 +1,5 @@
 import { SlashCommandBuilder } from 'discord.js';
-import { removeActivity, getCustomActivities } from '../database.js';
+import { removeActivity, getActivities } from '../database.js';
 
 export const data = new SlashCommandBuilder()
   .setName('removeactivity')
@@ -14,8 +14,8 @@ export const data = new SlashCommandBuilder()
 
 export async function autocomplete(interaction) {
   const focused = interaction.options.getFocused().toLowerCase();
-  const customs = getCustomActivities(interaction.guildId);
-  const filtered = customs
+  const all = getActivities(interaction.guildId);
+  const filtered = all
     .filter(a => a.name.toLowerCase().includes(focused))
     .slice(0, 25);
 
@@ -30,7 +30,7 @@ export async function execute(interaction) {
 
   if (result.changes === 0) {
     return interaction.reply({
-      content: `❌ No custom activity named **${name}** found. Default activities cannot be removed.`,
+      content: `❌ No activity named **${name}** found.`,
       flags: 64,
     });
   }
