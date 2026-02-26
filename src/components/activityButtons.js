@@ -75,16 +75,12 @@ export async function handleActivityButton(interaction) {
     .map(rule => rule(context))
     .filter(Boolean);
 
-  let reply = `✅ Logged **${activity.name}** for today! You're on a **${currentStreak}-day** streak 🔥`;
+  // Public message
+  const display = activity.emoji ? `${activity.emoji} ${activity.name}` : activity.name;
+  let publicMsg = `<@${userId}> logged **${display}** — **${currentStreak}-day** streak 🔥`;
   if (messages.length > 0) {
-    reply += '\n' + messages.join('\n');
+    publicMsg += '\n' + messages.join('\n');
   }
 
-  await interaction.reply({ content: reply, flags: 64 });
-
-  // Public message so others can see
-  const display = activity.emoji ? `${activity.emoji} ${activity.name}` : activity.name;
-  await interaction.channel.send(
-    `<@${userId}> logged **${display}** — **${currentStreak}-day** streak 🔥`
-  );
+  await interaction.reply({ content: publicMsg });
 }
