@@ -9,4 +9,7 @@ const DEFAULT_ACTIVITIES = [
   { emoji: '😴', name: 'Rest' },
 ];
 
+/** Max consecutive rest-only days before streak resets. */
+export const REST_STREAK_LIMIT = 5;
+
 export default DEFAULT_ACTIVITIES;

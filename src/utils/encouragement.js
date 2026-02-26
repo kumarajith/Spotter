@@ -1,3 +1,5 @@
+import { REST_STREAK_LIMIT } from '../defaults.js';
+
 /**
  * Each rule receives context and returns a string message or null.
  *
@@ -26,6 +28,12 @@ function consecutiveRest({ recentActivities }) {
     } else {
       break;
     }
+  }
+  if (restDays >= REST_STREAK_LIMIT) {
+    return `Your streak was reset after ${REST_STREAK_LIMIT} rest days. Time for a fresh start 💪`;
+  }
+  if (restDays === REST_STREAK_LIMIT - 1) {
+    return '⚠️ One more rest day will reset your streak! Get moving tomorrow 💪';
   }
   if (restDays >= 3) {
     return `You've been resting for ${restDays} days straight — ready to get back at it? 💪`;

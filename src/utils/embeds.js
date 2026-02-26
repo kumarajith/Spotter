@@ -81,13 +81,24 @@ export function buildLeaderboardEmbed(currentStreaks, allTimeStreaks) {
 
 export function buildStreakSummaryEmbed(streakEntries) {
   const today = new Date().toISOString().slice(0, 10);
-  const lines = streakEntries.map(e => {
-    const icon = e.streak >= 14 ? '🔥' : '💪';
-    return `${icon} <@${e.userId}> — ${e.streak} days`;
-  });
+
+  // Group by streak count
+  const groups = new Map();
+  for (const e of streakEntries) {
+    if (!groups.has(e.streak)) groups.set(e.streak, []);
+    groups.get(e.streak).push(`<@${e.userId}>`);
+  }
+
+  // Sort descending by streak count
+  const lines = [...groups.entries()]
+    .sort((a, b) => b[0] - a[0])
+    .map(([days, users]) => {
+      const icon = days >= 14 ? '🔥' : '💪';
+      return `${icon} **${days} days** — ${users.join(', ')}`;
+    });
 
   return new EmbedBuilder()
     .setTitle(`📊 Active Streaks — ${today}`)
-    .setDescription(lines.join(' | '))
+    .setDescription(lines.join('\n'))
     .setColor(0xed4245);
 }
