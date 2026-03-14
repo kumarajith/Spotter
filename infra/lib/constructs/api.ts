@@ -22,7 +22,7 @@ export class ApiConstruct extends Construct {
 
     this.apiLambda = new lambda.Function(this, 'ApiHandler', {
       runtime: lambda.Runtime.NODEJS_20_X,
-      handler: 'dist/lambda.handler',
+      handler: 'lambda.handler',
       code: lambda.Code.fromAsset('../dist'),
       memorySize: 512,
       timeout: cdk.Duration.seconds(30),

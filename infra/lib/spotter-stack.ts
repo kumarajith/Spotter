@@ -20,14 +20,13 @@ export class SpotterStack extends cdk.Stack {
       environment: props.environment,
     });
 
-    const discordParam =
-      ssm.StringParameter.fromSecureStringParameterAttributes(
-        this,
-        'DiscordSecret',
-        {
-          parameterName: `/spotter/${props.environment}/discord`,
-        },
-      );
+    const discordParam = ssm.StringParameter.fromSecureStringParameterAttributes(
+      this,
+      'DiscordSecret',
+      {
+        parameterName: `/spotter/${props.environment}/discord`,
+      },
+    );
 
     new ApiConstruct(this, 'Api', {
       table: db.table,
