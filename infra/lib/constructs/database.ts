@@ -12,9 +12,8 @@ export class DatabaseConstruct extends Construct {
   constructor(scope: Construct, id: string, props: DatabaseConstructProps) {
     super(scope, id);
 
-    const removalPolicy = props.environment === 'prod'
-      ? cdk.RemovalPolicy.RETAIN
-      : cdk.RemovalPolicy.DESTROY;
+    const removalPolicy =
+      props.environment === 'prod' ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY;
 
     this.table = new dynamodb.Table(this, 'SpotterTable', {
       tableName: `spotter-${props.environment}`,

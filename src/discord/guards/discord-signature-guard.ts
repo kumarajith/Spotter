@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
+import { CanActivate, ExecutionContext, Injectable, RawBodyRequest } from '@nestjs/common';
 import { verifyKey } from 'discord-interactions';
 import { DiscordConfigService } from '../../common/config/discord-config-service';
 import { Request } from 'express';
@@ -8,16 +8,15 @@ export class DiscordSignatureGuard implements CanActivate {
   constructor(private readonly configService: DiscordConfigService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const req = context.switchToHttp().getRequest<Request>();
+    const req = context.switchToHttp().getRequest<RawBodyRequest<Request>>();
     const signature = req.headers['x-signature-ed25519'] as string | undefined;
     const timestamp = req.headers['x-signature-timestamp'] as string | undefined;
     const publicKey = this.configService.publicKey;
 
-    if (!signature || !timestamp || !publicKey) {
+    if (!signature || !timestamp || !publicKey || !req.rawBody) {
       return false;
     }
 
-    const body = JSON.stringify(req.body);
-    return verifyKey(body, signature, timestamp, publicKey);
+    return verifyKey(req.rawBody, signature, timestamp, publicKey);
   }
 }

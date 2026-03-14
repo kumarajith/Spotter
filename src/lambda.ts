@@ -11,6 +11,7 @@ async function bootstrap(): Promise<Handler> {
   const expressApp = express();
   const app = await NestFactory.create(AppModule, new ExpressAdapter(expressApp), {
     logger: ['error', 'warn'],
+    rawBody: true,
   });
   await app.init();
   return serverlessExpress({ app: expressApp });
