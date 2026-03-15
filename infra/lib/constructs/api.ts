@@ -5,6 +5,7 @@ import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import * as apigateway from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import { SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import { Construct } from 'constructs';
 
 export interface ApiConstructProps {
@@ -37,6 +38,24 @@ export class ApiConstruct extends Construct {
     props.table.grantReadWriteData(this.apiLambda);
     props.queue.grantSendMessages(this.apiLambda);
     props.discordParam.grantRead(this.apiLambda);
+
+    const consumerLambda = new lambda.Function(this, 'SqsConsumer', {
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'handlers/sqs-consumer.handler',
+      code: lambda.Code.fromAsset('../dist'),
+      memorySize: 256,
+      timeout: cdk.Duration.seconds(60),
+      environment: {
+        TABLE_NAME: props.table.tableName,
+        DISCORD_PARAM_NAME: props.discordParam.parameterName,
+        NODE_ENV: props.environment,
+      },
+    });
+
+    props.table.grantReadWriteData(consumerLambda);
+    props.discordParam.grantRead(consumerLambda);
+
+    consumerLambda.addEventSource(new SqsEventSource(props.queue, { batchSize: 1 }));
 
     const httpApi = new apigateway.HttpApi(this, 'HttpApi', {
       apiName: `spotter-api-${props.environment}`,
