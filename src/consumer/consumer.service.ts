@@ -1,7 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { TrackingRepository } from '../tracking/tracking.repository';
 import { StreakService } from '../tracking/streak.service';
-import { ActivityLoggedMessage, SqsMessage } from '../common/types/dynamo.types';
+import {
+  ActivityLoggedMessage,
+  BackfillActivityMessage,
+  SqsMessage,
+} from '../common/types/dynamo.types';
 
 @Injectable()
 export class ConsumerService {
@@ -16,8 +20,38 @@ export class ConsumerService {
     switch (msg.type) {
       case 'ACTIVITY_LOGGED':
         return this.handleActivityLogged(msg);
-      // Add cases here as SqsMessage union grows; TypeScript will enforce exhaustiveness
+      case 'BACKFILL_ACTIVITY':
+        return this.handleBackfillActivity(msg);
     }
+  }
+
+  private async handleBackfillActivity(msg: BackfillActivityMessage): Promise<void> {
+    const label = msg.activityName.charAt(0).toUpperCase() + msg.activityName.slice(1);
+
+    const { alreadyLogged } = await this.trackingRepository.logActivity(
+      msg.guildId,
+      msg.userId,
+      msg.activityName,
+      msg.date,
+    );
+
+    if (alreadyLogged) {
+      await this.sendFollowup(
+        msg.applicationId,
+        msg.interactionToken,
+        `⚠️ You already logged **${label}** on ${msg.date}.`,
+      );
+      return;
+    }
+
+    const { currentStreak } = await this.streakService.recomputeStreak(msg.guildId, msg.userId);
+
+    const streakSuffix = currentStreak > 0 ? ` Your streak: 🔥 ${currentStreak}-day streak!` : '';
+    await this.sendFollowup(
+      msg.applicationId,
+      msg.interactionToken,
+      `✅ Backfilled **${label}** for ${msg.date}.${streakSuffix}`,
+    );
   }
 
   private async handleActivityLogged(msg: ActivityLoggedMessage): Promise<void> {

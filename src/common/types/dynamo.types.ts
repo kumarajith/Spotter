@@ -56,8 +56,18 @@ export interface ActivityLoggedMessage {
   applicationId: string;
 }
 
+export interface BackfillActivityMessage {
+  type: 'BACKFILL_ACTIVITY';
+  guildId: string;
+  userId: string;
+  activityName: string; // lowercased
+  date: string; // YYYY-MM-DD — explicit past date, not derived from timestamp
+  interactionToken: string;
+  applicationId: string;
+}
+
 // Discriminated union — extend with | NewMessageType as new message types are added
-export type SqsMessage = ActivityLoggedMessage;
+export type SqsMessage = ActivityLoggedMessage | BackfillActivityMessage;
 
 export interface TrackedChannelItem {
   PK: string; // GUILD#<guildId>

@@ -1,4 +1,5 @@
 import {
+  APIEmbed,
   APIChatInputApplicationCommandInteraction,
   InteractionResponseType,
   MessageFlags,
@@ -26,4 +27,14 @@ export function getStringOption(
   name: string,
 ): string | undefined {
   return (options?.find((o) => o.name === name) as { value?: string } | undefined)?.value;
+}
+
+export function embedResponse(embed: APIEmbed, isEphemeral = false) {
+  return {
+    type: InteractionResponseType.ChannelMessageWithSource,
+    data: {
+      embeds: [embed],
+      ...(isEphemeral && { flags: MessageFlags.Ephemeral }),
+    },
+  };
 }

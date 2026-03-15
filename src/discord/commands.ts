@@ -4,4 +4,5 @@ export const COMMANDS = {
   REMOVE_ACTIVITY: 'removeactivity',
   STREAK: 'streak',
   LEADERBOARD: 'leaderboard',
+  BACKFILL: 'backfill',
 } as const;

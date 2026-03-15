@@ -19,6 +19,43 @@ export class StreakRepository {
   }
 
   /**
+   * Returns top N users by current streak for the guild leaderboard.
+   * Queries GSI1 DESC, excluding users with a 0 streak.
+   */
+  async getTopCurrentStreaks(guildId: string, limit = 10): Promise<StreakItem[]> {
+    const result = await this.dynamo.query({
+      IndexName: 'GSI1',
+      KeyConditionExpression: 'GSI1PK = :pk AND GSI1SK > :zero',
+      ExpressionAttributeValues: {
+        ':pk': `LEADERBOARD#${guildId}`,
+        ':zero': 'STREAK#00000',
+      },
+      ScanIndexForward: false,
+      Limit: limit,
+    });
+
+    return (result.Items ?? []) as StreakItem[];
+  }
+
+  /**
+   * Returns all streak items for a guild.
+   * Used to compute all-time best by sorting on longestStreak in app code.
+   * Hard cap of 500 items — sufficient for fitness guild scale.
+   */
+  async getAllGuildStreaks(guildId: string): Promise<StreakItem[]> {
+    const result = await this.dynamo.query({
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :skPrefix)',
+      ExpressionAttributeValues: {
+        ':pk': `GUILD#${guildId}`,
+        ':skPrefix': 'STREAK#',
+      },
+      Limit: 500,
+    });
+
+    return (result.Items ?? []) as StreakItem[];
+  }
+
+  /**
    * Returns all activity logs for a user in a guild, sorted DESC by date.
    * Used by recomputeStreak() for backfill.
    */

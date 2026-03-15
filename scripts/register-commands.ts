@@ -65,6 +65,26 @@ const commands: RESTPutAPIApplicationCommandsJSONBody = [
     name: COMMANDS.LEADERBOARD,
     description: 'Show top streaks for this server',
   },
+  {
+    type: ApplicationCommandType.ChatInput,
+    name: COMMANDS.BACKFILL,
+    description: 'Log an activity for a past date and recalculate your streak',
+    options: [
+      {
+        type: ApplicationCommandOptionType.String,
+        name: 'date',
+        description: 'Date to backfill (YYYY-MM-DD, e.g. 2026-03-10)',
+        required: true,
+      },
+      {
+        type: ApplicationCommandOptionType.String,
+        name: 'activity',
+        description: 'Activity to log',
+        required: true,
+        autocomplete: true,
+      },
+    ],
+  },
 ];
 
 async function main() {
