@@ -2,9 +2,17 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { DiscordModule } from './discord/discord.module';
 import { DiscordConfigModule } from './common/config/discord-config.module';
+import { DynamoModule } from './common/dynamodb/dynamodb.module';
+import { ActivityModule } from './activity/activity.module';
 
 @Module({
-  imports: [ConfigModule.forRoot(), DiscordModule, DiscordConfigModule],
+  imports: [
+    ConfigModule.forRoot(),
+    ActivityModule,
+    DynamoModule,
+    DiscordModule,
+    DiscordConfigModule,
+  ],
   controllers: [],
   providers: [],
 })

@@ -17,11 +17,22 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "infra:build": "cd infra && npm run build",
+    "infra:synth": "cd infra && npx cdk synth",
+    "infra:diff:dev": "cd infra && npx cdk diff -c env=dev",
+    "infra:diff:prod": "cd infra && npx cdk diff -c env=prod",
+    "infra:deploy:dev": "cd infra && npx cdk deploy -c env=dev",
+    "infra:deploy:prod": "cd infra && npx cdk deploy -c env=prod",
+    "commands:register": "ts-node scripts/register-commands.ts",
+    "setup:local": "ts-node scripts/setup-local.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1009.0",
     "@aws-sdk/client-ssm": "^3.1009.0",
+    "@aws-sdk/lib-dynamodb": "^3.1009.0",
     "@codegenie/serverless-express": "^4.17.1",
+    "@discordjs/builders": "^1.13.1",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.3",
     "@nestjs/core": "^11.0.1",
@@ -33,6 +44,7 @@
     "rxjs": "^7.8.1"
   },
   "devDependencies": {
+    "@discordjs/rest": "^2.6.0",
     "@eslint/eslintrc": "^3.2.0",
     "@eslint/js": "^9.18.0",
     "@nestjs/cli": "^11.0.0",
