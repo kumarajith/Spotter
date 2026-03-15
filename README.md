@@ -26,43 +26,58 @@ Members log workouts by clicking buttons on a daily panel. Spotter tracks consec
 
 ## Architecture
 
-> For the full AWS infrastructure diagram, see **[architecture on Cloudcraft](#)** *(link once deployed).*
-
 ```mermaid
-graph TD
-    U([User clicks button\nor runs command])
-
+flowchart LR
     subgraph Discord
-        U
+        U([fa:fa-user User])
     end
 
-    subgraph AWS
-        APIGW["API Gateway\nHTTP API"]
-        API["API Lambda\nNestJS · 512 MB · 30s"]
-        SQS["SQS Queue\n+ Dead Letter Queue"]
-        CON["Consumer Lambda\nNestJS · 256 MB · 60s"]
-        SCH["Scheduler Lambda\n512 MB · 5 min"]
-        EB["EventBridge Scheduler\ncron 0 8 * * ? *"]
-        DB[("DynamoDB\nspotter-{env}\nsingle table · on-demand")]
-        SSM["SSM Parameter Store\n/spotter/{env}/discord"]
-        CW["CloudWatch Alarms\nDLQ · Consumer · Scheduler"]
+    subgraph AWS["AWS · ap-south-1"]
+        direction TB
+
+        subgraph Request["Request Path"]
+            APIGW[/"API Gateway<br/>HTTP API"/]
+            API["API Lambda<br/><small>NestJS · 512 MB · 30s</small>"]
+        end
+
+        subgraph Async["Async Processing"]
+            SQS[["SQS Queue"]]
+            DLQ[["Dead Letter Queue"]]
+            CON["Consumer Lambda<br/><small>NestJS · 256 MB · 60s</small>"]
+        end
+
+        subgraph Scheduled["Daily Automation"]
+            EB{{EventBridge Scheduler<br/><small>cron 0 8 * * ? *</small>}}
+            SCH["Scheduler Lambda<br/><small>512 MB · 5 min</small>"]
+        end
+
+        subgraph Storage["Storage & Config"]
+            DB[(DynamoDB<br/><small>single table · on-demand</small>)]
+            SSM["SSM SecureString<br/><small>/spotter/{env}/discord</small>"]
+        end
+
+        subgraph Ops["Observability"]
+            CW["CloudWatch Alarms"]
+            SNS["SNS Topic"]
+        end
     end
 
     U -->|"POST /interactions"| APIGW
     APIGW --> API
-    API -->|"type 5 deferred response\n< 3 s"| U
-    API -->|"ACTIVITY_LOGGED msg"| SQS
-    SQS -->|"trigger · batch=1"| CON
-    CON -->|"write log\nupdate streak\ncheck milestone"| DB
-    CON -->|"followup message"| U
+    API -.->|"type 5 deferred<br/>< 3 s"| U
+    API -->|"send message"| SQS
+    SQS -->|"batch = 1"| CON
+    SQS -->|"3 failures"| DLQ
+    CON -->|"write log · update streak"| DB
+    CON -.->|"followup message"| U
 
-    EB -->|"8 AM UTC daily"| SCH
-    SCH -->|"reset stale streaks\nquery channels"| DB
-    SCH -->|"streak summary\nrepost panel"| U
+    EB -->|"8 AM UTC"| SCH
+    SCH -->|"reset streaks · query channels"| DB
+    SCH -.->|"summary + panel"| U
 
-    API & CON & SCH -->|"read credentials"| SSM
-    SQS -->|"after 3 failures"| CW
-    CON & SCH -->|"errors"| CW
+    API & CON & SCH -->|"read creds"| SSM
+    DLQ & CON & SCH -.-> CW
+    CW --> SNS
 ```
 
 ### Key design decisions
@@ -274,6 +289,25 @@ git push origin main
 | `npm run commands:register` | Register slash commands with Discord |
 | `npm run infra:synth` | Synthesize CloudFormation template |
 | `npm run infra:diff:dev` | Diff against deployed dev stack |
+
+### Testing
+
+```bash
+npm test                  # Unit tests (app)
+cd infra && npm test      # CDK template assertions
+```
+
+80+ test cases covering:
+
+| Area | What's tested |
+|---|---|
+| Streak engine | Incremental updates, rest-day limits, same-day correction, backfill recompute |
+| Discord interactions | Command routing, button clicks, autocomplete, validation, error paths |
+| SQS consumer | Message processing, deferred responses, fetch failures, resilience |
+| Signature guard | Valid/invalid signatures, missing headers |
+| Type guards | Discriminated union validation for SQS messages |
+| Lambda handlers | Singleton bootstrap, batch processing, malformed input |
+| CDK infrastructure | DynamoDB config, SQS redrive, Lambda runtimes, CloudWatch alarms, API Gateway |
 
 ### DynamoDB single-table key design
 
