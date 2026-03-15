@@ -25,7 +25,11 @@
     "infra:deploy:dev": "cd infra && npx cdk deploy -c env=dev",
     "infra:deploy:prod": "cd infra && npx cdk deploy -c env=prod",
     "commands:register": "ts-node scripts/register-commands.ts",
-    "setup:local": "ts-node scripts/setup-local.ts"
+    "setup:local": "ts-node scripts/setup-local.ts",
+    "consumer:local": "ts-node scripts/run-consumer.ts",
+    "docker:up": "docker compose up -d --wait && npm run setup:local",
+    "dev": "concurrently --names \"API,CONSUMER\" --prefix-colors \"cyan,green\" \"npm run start:dev\" \"npm run consumer:local\"",
+    "local": "npm run docker:up && npm run dev"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1009.0",
@@ -56,6 +60,7 @@
     "@types/jest": "^30.0.0",
     "@types/node": "^22.10.7",
     "@types/supertest": "^6.0.2",
+    "concurrently": "^9.2.1",
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-prettier": "^5.2.2",

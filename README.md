@@ -1,98 +1,146 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Spotter
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+A Discord fitness-tracking bot. Members log workouts via button clicks, build streaks, and compete on a leaderboard. Migrated from a monolithic Discord.js bot to a fully serverless AWS architecture.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## Architecture
 
-## Description
+```
+Discord
+  │
+  ▼
+API Gateway → API Lambda (NestJS + serverless-express)
+                  │  synchronous commands (/streak, /leaderboard, /backfill validation)
+                  │
+                  └─► SQS Queue
+                            │
+                            ▼
+                      Consumer Lambda (NestJS app context)
+                            │  logs activity, updates streak
+                            │
+                            └─► Discord webhook followup (ephemeral)
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
-
-## Project setup
-
-```bash
-$ npm install
+Both Lambdas ──► DynamoDB (single table, on-demand)
+API Lambda   ──► SSM Parameter Store (Discord credentials)
 ```
 
-## Compile and run the project
+**Key design decisions:**
+- Single DynamoDB table with GSI1 for user-scoped and leaderboard queries
+- Activity logging is async (SQS) so Discord's 3-second interaction deadline is never at risk
+- Streak state is incremental (updated per-log) with a full-recompute path for backfill
+- Consumer Lambda bootstraps a lightweight NestJS app context (no HTTP, no SSM) — fast cold starts
 
+## Prerequisites
+
+- Node.js 20+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) — provides `docker` CLI and `docker compose`
+
+## Quick Start (Local Dev)
+
+**1. Install dependencies**
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+npm install
 ```
 
-## Run tests
-
+**2. Configure environment**
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+cp .env.example .env
+# Fill in your Discord credentials:
+#   DISCORD_BOT_TOKEN
+#   DISCORD_APPLICATION_ID
+#   DISCORD_PUBLIC_KEY
 ```
 
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
+**3. Start everything**
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+npm run local
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+This starts LocalStack (DynamoDB + SQS), provisions the table and queue, then runs the API and consumer in the same terminal with labeled output.
 
-## Resources
+**Subsequent runs** (Docker containers already up):
+```bash
+npm run dev
+```
 
-Check out a few resources that may come in handy when working with NestJS:
+**Shut down**
+```bash
+docker compose down
+```
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+## Environment Variables
 
-## Support
+| Variable | Description | Local default |
+|---|---|---|
+| `DISCORD_BOT_TOKEN` | Bot token from Discord Developer Portal | — |
+| `DISCORD_APPLICATION_ID` | Application ID from Discord Developer Portal | — |
+| `DISCORD_PUBLIC_KEY` | Public key for interaction signature verification | — |
+| `TABLE_NAME` | DynamoDB table name | `spotter-dev` |
+| `QUEUE_URL` | Full SQS queue URL | `http://localhost:4566/000000000000/spotter-local` |
+| `DYNAMODB_ENDPOINT` | Override DynamoDB endpoint (local only) | `http://localhost:4566` |
+| `AWS_ACCESS_KEY_ID` | AWS credentials (use `local` for LocalStack) | `local` |
+| `AWS_SECRET_ACCESS_KEY` | AWS credentials (use `local` for LocalStack) | `local` |
+| `AWS_DEFAULT_REGION` | AWS region | `us-east-1` |
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+## Commands
 
-## Stay in touch
+### Local dev
+| Command | Description |
+|---|---|
+| `npm run local` | First-time / fresh start — starts Docker, provisions, then runs app |
+| `npm run dev` | Start API + consumer (assumes Docker is already up) |
+| `npm run docker:up` | Start LocalStack + provision table and queue only |
+| `npm run setup:local` | Provision DynamoDB table and SQS queue (idempotent) |
+| `npm run consumer:local` | Run the SQS consumer poller only |
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+### Discord
+| Command | Description |
+|---|---|
+| `npm run commands:register` | Register slash commands with Discord (set `DISCORD_GUILD_ID` for instant guild-scoped registration) |
 
-## License
+### AWS / CDK
+| Command | Description |
+|---|---|
+| `npm run infra:synth` | Synthesize CloudFormation templates |
+| `npm run infra:diff:dev` | Diff CDK changes against deployed dev stack |
+| `npm run infra:deploy:dev` | Deploy to dev environment |
+| `npm run infra:deploy:prod` | Deploy to prod environment |
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+### Build & test
+| Command | Description |
+|---|---|
+| `npm run build` | TypeScript compile |
+| `npm run lint` | ESLint with auto-fix |
+| `npm run test` | Unit tests |
+
+## Discord Commands
+
+| Command | Description |
+|---|---|
+| `/setup` | Post the activity tracker panel in the current channel |
+| `/addactivity` | Add a custom activity for the server |
+| `/removeactivity` | Remove a custom activity |
+| `/streak [user]` | Show streak stats and 30-day activity heatmap |
+| `/leaderboard` | Show top 10 current streaks and all-time bests |
+| `/backfill <date> <activity>` | Log an activity for a past date and recalculate streak |
+
+## Project Structure
+
+```
+src/
+  discord/          # Interaction handler, command routing
+  activity/         # Activity CRUD
+  tracking/         # Activity log repository, streak computation
+  consumer/         # SQS consumer service
+  sqs/              # SQS producer service
+  panel/            # Tracker panel builder and poster
+  common/
+    config/         # Discord credentials via SSM
+    dynamodb/       # DynamoDB wrapper service
+    types/          # dynamo.types.ts, sqs.types.ts
+  handlers/
+    sqs-consumer.handler.ts  # Lambda entry point for SQS consumer
+  lambda.ts                  # Lambda entry point for API
+infra/              # AWS CDK stack
+scripts/            # Local dev and command registration scripts
+legacy/             # Original Discord.js bot (reference only)
+```

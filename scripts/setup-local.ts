@@ -4,15 +4,23 @@ import {
   DynamoDBClient,
   ResourceInUseException,
 } from '@aws-sdk/client-dynamodb';
+import {
+  CreateQueueCommand,
+  GetQueueUrlCommand,
+  QueueDoesNotExist,
+  SQSClient,
+} from '@aws-sdk/client-sqs';
 
-async function main() {
-  const endpoint = process.env.DYNAMODB_ENDPOINT ?? 'http://localhost:8000';
+const LOCAL_CREDENTIALS = { accessKeyId: 'local', secretAccessKey: 'local' };
+
+async function setupDynamo() {
+  const endpoint = process.env.DYNAMODB_ENDPOINT ?? 'http://localhost:4566';
   const tableName = process.env.TABLE_NAME ?? 'spotter-dev';
 
   const client = new DynamoDBClient({
     endpoint,
     region: 'us-east-1',
-    credentials: { accessKeyId: 'local', secretAccessKey: 'local' },
+    credentials: LOCAL_CREDENTIALS,
   });
 
   try {
@@ -50,6 +58,45 @@ async function main() {
     }
     throw err;
   }
+}
+
+async function setupSqs() {
+  const queueUrl = process.env.QUEUE_URL;
+  if (!queueUrl) {
+    console.log('⚠️  QUEUE_URL not set — skipping SQS setup.');
+    return;
+  }
+
+  const { hostname, origin } = new URL(queueUrl);
+  if (hostname.includes('amazonaws.com')) {
+    console.log('ℹ️  QUEUE_URL points to AWS — skipping local SQS setup.');
+    return;
+  }
+
+  // Extract queue name from the URL path: http://localhost:4566/000000000000/queue-name
+  const queueName = queueUrl.split('/').at(-1);
+  if (!queueName) throw new Error(`Could not parse queue name from QUEUE_URL: ${queueUrl}`);
+
+  const client = new SQSClient({
+    endpoint: origin,
+    region: 'us-east-1',
+    credentials: LOCAL_CREDENTIALS,
+  });
+
+  try {
+    await client.send(new GetQueueUrlCommand({ QueueName: queueName }));
+    console.log(`ℹ️  Queue "${queueName}" already exists — skipping.`);
+  } catch (err) {
+    if (!(err instanceof QueueDoesNotExist)) throw err;
+
+    await client.send(new CreateQueueCommand({ QueueName: queueName }));
+    console.log(`✅ Queue "${queueName}" created at ${origin}`);
+  }
+}
+
+async function main() {
+  await setupDynamo();
+  await setupSqs();
 }
 
 main().catch((err) => {
