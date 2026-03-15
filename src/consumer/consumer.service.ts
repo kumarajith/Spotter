@@ -67,10 +67,11 @@ export class ConsumerService {
     const label = msg.activityName.charAt(0).toUpperCase() + msg.activityName.slice(1);
 
     if (alreadyLogged) {
+      // Ephemeral — via interaction webhook (defer was ephemeral, so followup is too)
       await this.sendFollowup(
         msg.applicationId,
         msg.interactionToken,
-        `⚠️ You already logged **${label}** today.`,
+        `👍 Already logged **${label}** today!`,
       );
       return;
     }
@@ -82,12 +83,34 @@ export class ConsumerService {
       date,
     );
 
-    const streakSuffix = currentStreak > 1 ? ` 🔥 ${currentStreak}-day streak!` : '';
-    await this.sendFollowup(
-      msg.applicationId,
-      msg.interactionToken,
-      `✅ Logged **${label}**!${streakSuffix}`,
+    const streakSuffix = currentStreak > 0 ? ` — **${currentStreak}-day** streak 🔥` : '';
+    // Public message — posted directly to the channel via bot token (not interaction webhook)
+    await this.sendChannelMessage(
+      msg.channelId,
+      `<@${msg.userId}> logged **${label}**${streakSuffix}`,
     );
+  }
+
+  private async sendChannelMessage(channelId: string, content: string): Promise<void> {
+    const botToken = process.env.DISCORD_BOT_TOKEN;
+    if (!botToken) {
+      this.logger.error('DISCORD_BOT_TOKEN is not set — cannot send channel message');
+      return;
+    }
+
+    const url = `https://discord.com/api/v10/channels/${channelId}/messages`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bot ${botToken}`,
+      },
+      body: JSON.stringify({ content }),
+    });
+
+    if (!response.ok) {
+      this.logger.error(`Channel message failed [${response.status}]: ${response.statusText}`);
+    }
   }
 
   private async sendFollowup(
@@ -100,7 +123,7 @@ export class ConsumerService {
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content, flags: 64 }), // flags: 64 = ephemeral
+      body: JSON.stringify({ content, flags: 64 }), // always ephemeral — only used for error/duplicate cases
     });
 
     if (!response.ok) {

@@ -4,6 +4,7 @@ export interface ActivityLoggedMessage {
   userId: string;
   activityName: string; // lowercased (e.g. "push", "rest")
   timestamp: string; // ISO string — used as loggedAt and to derive date
+  channelId: string; // used to post the public log message directly via bot token
   interactionToken: string;
   applicationId: string;
 }

@@ -137,6 +137,11 @@ export class DiscordService {
       return ephemeral('Could not identify user.');
     }
 
+    const channelId = interaction.channel?.id;
+    if (!channelId) {
+      return ephemeral('Could not determine channel.');
+    }
+
     const activityName = interaction.data.custom_id.slice('log_activity:'.length);
 
     const message: ActivityLoggedMessage = {
@@ -145,13 +150,15 @@ export class DiscordService {
       userId,
       activityName,
       timestamp: new Date().toISOString(),
+      channelId,
       interactionToken: interaction.token,
       applicationId: this.discordConfig.applicationId,
     };
 
     await this.sqsService.send(message);
 
-    // Ephemeral deferred response — Discord shows nothing visible; consumer sends the followup
+    // Ephemeral defer: "Bot is thinking..." only visible to the clicker.
+    // Consumer posts the public log directly to the channel via bot token.
     return {
       type: InteractionResponseType.DeferredChannelMessageWithSource,
       data: { flags: MessageFlags.Ephemeral },

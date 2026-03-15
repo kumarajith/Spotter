@@ -99,6 +99,12 @@ async function main() {
 
   const rest = new REST({ version: '10' }).setToken(token);
 
+  if (guildId) {
+    // Clear global commands so guild + global don't both show up as duplicates
+    await rest.put(Routes.applicationCommands(applicationId), { body: [] });
+    console.log('Cleared global commands.');
+  }
+
   const route = guildId
     ? Routes.applicationGuildCommands(applicationId, guildId)
     : Routes.applicationCommands(applicationId);
