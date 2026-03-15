@@ -24,5 +24,10 @@ export class DiscordController {
     if (interaction.type === v10.InteractionType.MessageComponent) {
       return this.discordService.handleComponent(interaction);
     }
+
+    // Type 4: APPLICATION_COMMAND_AUTOCOMPLETE
+    if (interaction.type === v10.InteractionType.ApplicationCommandAutocomplete) {
+      return this.discordService.handleAutocomplete(interaction);
+    }
   }
 }

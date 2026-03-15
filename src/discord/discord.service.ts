@@ -1,19 +1,24 @@
 import { Injectable } from '@nestjs/common';
 import {
+  APIApplicationCommandAutocompleteInteraction,
   APIApplicationCommandInteraction,
   APIChatInputApplicationCommandInteraction,
   APIInteraction,
+  APIMessageComponentInteraction,
+  ComponentType,
 } from 'discord-api-types/v10';
 import { ActivityService } from '../activity/activity.service';
 import { PanelService } from '../panel/panel.service';
+import { TrackingService } from '../tracking/tracking.service';
 import { COMMANDS } from './commands';
-import { ephemeral, getStringOption } from './discord.utils';
+import { autocompleteResult, ephemeral, getStringOption } from './discord.utils';
 
 @Injectable()
 export class DiscordService {
   constructor(
     private readonly activityService: ActivityService,
     private readonly panelService: PanelService,
+    private readonly trackingService: TrackingService,
   ) {}
 
   async handleCommand(interaction: APIApplicationCommandInteraction) {
@@ -54,9 +59,70 @@ export class DiscordService {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  handleComponent(_interaction: APIInteraction) {
-    return ephemeral('Component not implemented yet.');
+  async handleAutocomplete(interaction: APIApplicationCommandAutocompleteInteraction) {
+    const guildId = interaction.guild_id;
+    if (!guildId) return autocompleteResult([]);
+
+    if (interaction.data.name === COMMANDS.REMOVE_ACTIVITY) {
+      const focusedOption = (interaction.data.options ?? []).find(
+        (opt) => (opt as { focused?: boolean }).focused,
+      ) as { value?: string } | undefined;
+
+      const typedValue = focusedOption?.value?.toLowerCase() ?? '';
+
+      const activities = await this.activityService.getActivities(guildId);
+
+      const choices = activities
+        .filter((activity) => activity.displayName.toLowerCase().includes(typedValue))
+        .slice(0, 25)
+        .map((activity) => ({
+          name: activity.emoji ? `${activity.emoji} ${activity.displayName}` : activity.displayName,
+          value: activity.displayName,
+        }));
+
+      return autocompleteResult(choices);
+    }
+
+    return autocompleteResult([]);
+  }
+
+  async handleComponent(interaction: APIInteraction) {
+    const componentInteraction = interaction as APIMessageComponentInteraction;
+
+    if (componentInteraction.data.component_type !== ComponentType.Button) {
+      return ephemeral('Unknown component.');
+    }
+
+    const { custom_id } = componentInteraction.data;
+
+    if (custom_id.startsWith('log_activity:')) {
+      return this.handleLogActivity(componentInteraction);
+    }
+
+    return ephemeral('Unknown component.');
+  }
+
+  private async handleLogActivity(interaction: APIMessageComponentInteraction) {
+    const guildId = interaction.guild_id;
+    if (!guildId) {
+      return ephemeral('This can only be used in a server.');
+    }
+
+    const userId = interaction.member?.user.id ?? interaction.user?.id;
+    if (!userId) {
+      return ephemeral('Could not identify user.');
+    }
+
+    const activityName = interaction.data.custom_id.slice('log_activity:'.length);
+    const { alreadyLogged } = await this.trackingService.log(guildId, userId, activityName);
+
+    const label = activityName.charAt(0).toUpperCase() + activityName.slice(1);
+
+    if (alreadyLogged) {
+      return ephemeral(`⚠️ You already logged **${label}** today.`);
+    }
+
+    return ephemeral(`✅ Logged **${label}** for today! Keep it up 💪`);
   }
 
   private async handleAddActivity(

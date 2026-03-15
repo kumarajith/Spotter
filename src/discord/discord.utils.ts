@@ -4,6 +4,16 @@ import {
   MessageFlags,
 } from 'discord-api-types/v10';
 
+export function autocompleteResult(choices: { name: string; value: string }[]): {
+  type: InteractionResponseType.ApplicationCommandAutocompleteResult;
+  data: { choices: { name: string; value: string }[] };
+} {
+  return {
+    type: InteractionResponseType.ApplicationCommandAutocompleteResult,
+    data: { choices },
+  };
+}
+
 export function ephemeral(content: string) {
   return {
     type: InteractionResponseType.ChannelMessageWithSource,

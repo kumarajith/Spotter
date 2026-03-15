@@ -3,9 +3,10 @@ import { DiscordService } from './discord.service';
 import { DiscordController } from './discord.controller';
 import { ActivityModule } from '../activity/activity.module';
 import { PanelModule } from '../panel/panel.module';
+import { TrackingModule } from '../tracking/tracking.module';
 
 @Module({
-  imports: [ActivityModule, PanelModule],
+  imports: [ActivityModule, PanelModule, TrackingModule],
   controllers: [DiscordController],
   providers: [DiscordService],
 })
