@@ -1,146 +1,291 @@
 # Spotter
 
-A Discord fitness-tracking bot. Members log workouts via button clicks, build streaks, and compete on a leaderboard. Migrated from a monolithic Discord.js bot to a fully serverless AWS architecture.
+> A serverless Discord bot for tracking daily fitness activity, streaks, and server leaderboards.
+
+[![CI](https://github.com/kumarajith/Spotter/actions/workflows/ci.yml/badge.svg)](https://github.com/kumarajith/Spotter/actions/workflows/ci.yml)
+[![Deploy](https://github.com/kumarajith/Spotter/actions/workflows/deploy.yml/badge.svg)](https://github.com/kumarajith/Spotter/actions/workflows/deploy.yml)
+![Node.js](https://img.shields.io/badge/node-24-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-blue)
+
+Members log workouts by clicking buttons on a daily panel. Spotter tracks consecutive-day streaks, resets when activity lapses, and posts a leaderboard. The entire backend runs on AWS Lambda — zero idle compute, scales to zero when unused.
+
+---
+
+## Features
+
+- **One-click activity logging** — button panel posted daily with configurable activity types
+- **Streak tracking** — per-user consecutive-day streaks; up to 5 rest-only days before a break
+- **Milestone celebrations** — in-channel messages at 7, 14, 30, 50, and 100-day milestones
+- **30-day heatmap** — visual grid of active vs rest days per user via `/streak`
+- **Leaderboard** — current and all-time best streaks via `/leaderboard`
+- **Custom activities** — server admins can add and remove activity types
+- **Backfill** — log a missed past date and have the streak recomputed correctly
+- **Daily automation** — panel reposts at 8 AM UTC with an active-streak summary
+
+---
 
 ## Architecture
 
+> For the full AWS infrastructure diagram, see **[architecture on Cloudcraft](#)** *(link once deployed).*
+
+```mermaid
+graph TD
+    U([User clicks button\nor runs command])
+
+    subgraph Discord
+        U
+    end
+
+    subgraph AWS
+        APIGW["API Gateway\nHTTP API"]
+        API["API Lambda\nNestJS · 512 MB · 30s"]
+        SQS["SQS Queue\n+ Dead Letter Queue"]
+        CON["Consumer Lambda\nNestJS · 256 MB · 60s"]
+        SCH["Scheduler Lambda\n512 MB · 5 min"]
+        EB["EventBridge Scheduler\ncron 0 8 * * ? *"]
+        DB[("DynamoDB\nspotter-{env}\nsingle table · on-demand")]
+        SSM["SSM Parameter Store\n/spotter/{env}/discord"]
+        CW["CloudWatch Alarms\nDLQ · Consumer · Scheduler"]
+    end
+
+    U -->|"POST /interactions"| APIGW
+    APIGW --> API
+    API -->|"type 5 deferred response\n< 3 s"| U
+    API -->|"ACTIVITY_LOGGED msg"| SQS
+    SQS -->|"trigger · batch=1"| CON
+    CON -->|"write log\nupdate streak\ncheck milestone"| DB
+    CON -->|"followup message"| U
+
+    EB -->|"8 AM UTC daily"| SCH
+    SCH -->|"reset stale streaks\nquery channels"| DB
+    SCH -->|"streak summary\nrepost panel"| U
+
+    API & CON & SCH -->|"read credentials"| SSM
+    SQS -->|"after 3 failures"| CW
+    CON & SCH -->|"errors"| CW
 ```
-Discord
-  │
-  ▼
-API Gateway → API Lambda (NestJS + serverless-express)
-                  │  synchronous commands (/streak, /leaderboard, /backfill validation)
-                  │
-                  └─► SQS Queue
-                            │
-                            ▼
-                      Consumer Lambda (NestJS app context)
-                            │  logs activity, updates streak
-                            │
-                            └─► Discord webhook followup (ephemeral)
 
-Both Lambdas ──► DynamoDB (single table, on-demand)
-API Lambda   ──► SSM Parameter Store (Discord credentials)
-```
+### Key design decisions
 
-**Key design decisions:**
-- Single DynamoDB table with GSI1 for user-scoped and leaderboard queries
-- Activity logging is async (SQS) so Discord's 3-second interaction deadline is never at risk
-- Streak state is incremental (updated per-log) with a full-recompute path for backfill
-- Consumer Lambda bootstraps a lightweight NestJS app context (no HTTP, no SSM) — fast cold starts
+| Decision | Rationale |
+|---|---|
+| Webhook interactions over Gateway | Serverless-native — no idle process, scales to zero |
+| SQS between API and Consumer | Decouples Discord's 3 s deadline from DynamoDB writes |
+| Single DynamoDB table | All entities in one table with SK prefix routing; one env var, one IAM grant |
+| Pre-computed streaks | DynamoDB has no aggregation — write-time O(1) vs read-time scan of all logs |
+| EventBridge Scheduler (not Rules) | Native timezone support, per-schedule DLQ, flexible invocation windows |
+| SSM over Secrets Manager | Equivalent security at $0 vs $0.40/secret/month |
 
-## Prerequisites
+---
 
-- Node.js 20+
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) — provides `docker` CLI and `docker compose`
+## Tech Stack
 
-## Quick Start (Local Dev)
+| Layer | Technology |
+|---|---|
+| Runtime | Node.js 24, TypeScript |
+| Framework | NestJS 11 |
+| HTTP Lambda | `@codegenie/serverless-express` |
+| Cloud | AWS Lambda, API Gateway (HTTP API v2), DynamoDB, SQS, EventBridge Scheduler, SSM, CloudWatch |
+| IaC | AWS CDK v2 (TypeScript) |
+| CI/CD | GitHub Actions + OIDC (no stored AWS credentials) |
+| Local dev | LocalStack via Docker |
 
-**1. Install dependencies**
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 24+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- A Discord application ([Developer Portal](https://discord.com/developers/applications))
+
+### 1. Install dependencies
+
 ```bash
 npm install
 ```
 
-**2. Configure environment**
+### 2. Configure environment
+
 ```bash
 cp .env.example .env
-# Fill in your Discord credentials:
-#   DISCORD_BOT_TOKEN
-#   DISCORD_APPLICATION_ID
-#   DISCORD_PUBLIC_KEY
 ```
 
-**3. Start everything**
+Edit `.env` with your Discord credentials from the Developer Portal:
+
+```env
+DISCORD_BOT_TOKEN=
+DISCORD_APPLICATION_ID=
+DISCORD_PUBLIC_KEY=
+```
+
+### 3. Start local environment
+
 ```bash
 npm run local
 ```
 
-This starts LocalStack (DynamoDB + SQS), provisions the table and queue, then runs the API and consumer in the same terminal with labeled output.
+This starts LocalStack (DynamoDB + SQS), provisions the table and queue, then runs the API server and SQS consumer in parallel with labeled output.
 
-**Subsequent runs** (Docker containers already up):
+```
+[API]      NestJS application listening on port 3000
+[CONSUMER] Polling SQS at http://localhost:4566...
+```
+
+**Subsequent runs** (Docker already running):
+
 ```bash
 npm run dev
 ```
 
-**Shut down**
+### 4. Register slash commands
+
 ```bash
-docker compose down
+npm run commands:register
 ```
 
-## Environment Variables
+Set `DISCORD_GUILD_ID` in `.env` for instant guild-scoped registration during development. Leave it unset for global registration (takes up to 1 hour to propagate).
 
-| Variable | Description | Local default |
-|---|---|---|
-| `DISCORD_BOT_TOKEN` | Bot token from Discord Developer Portal | — |
-| `DISCORD_APPLICATION_ID` | Application ID from Discord Developer Portal | — |
-| `DISCORD_PUBLIC_KEY` | Public key for interaction signature verification | — |
-| `TABLE_NAME` | DynamoDB table name | `spotter-dev` |
-| `QUEUE_URL` | Full SQS queue URL | `http://localhost:4566/000000000000/spotter-local` |
-| `DYNAMODB_ENDPOINT` | Override DynamoDB endpoint (local only) | `http://localhost:4566` |
-| `AWS_ACCESS_KEY_ID` | AWS credentials (use `local` for LocalStack) | `local` |
-| `AWS_SECRET_ACCESS_KEY` | AWS credentials (use `local` for LocalStack) | `local` |
-| `AWS_DEFAULT_REGION` | AWS region | `us-east-1` |
+### 5. Expose local server to Discord
 
-## Commands
+Discord must be able to reach your local endpoint to send interactions:
 
-### Local dev
-| Command | Description |
-|---|---|
-| `npm run local` | First-time / fresh start — starts Docker, provisions, then runs app |
-| `npm run dev` | Start API + consumer (assumes Docker is already up) |
-| `npm run docker:up` | Start LocalStack + provision table and queue only |
-| `npm run setup:local` | Provision DynamoDB table and SQS queue (idempotent) |
-| `npm run consumer:local` | Run the SQS consumer poller only |
+```bash
+ngrok http 3000
+```
 
-### Discord
-| Command | Description |
-|---|---|
-| `npm run commands:register` | Register slash commands with Discord (set `DISCORD_GUILD_ID` for instant guild-scoped registration) |
+Set the resulting HTTPS URL + `/interactions` as the **Interactions Endpoint URL** in your Discord application settings.
 
-### AWS / CDK
-| Command | Description |
-|---|---|
-| `npm run infra:synth` | Synthesize CloudFormation templates |
-| `npm run infra:diff:dev` | Diff CDK changes against deployed dev stack |
-| `npm run infra:deploy:dev` | Deploy to dev environment |
-| `npm run infra:deploy:prod` | Deploy to prod environment |
-
-### Build & test
-| Command | Description |
-|---|---|
-| `npm run build` | TypeScript compile |
-| `npm run lint` | ESLint with auto-fix |
-| `npm run test` | Unit tests |
+---
 
 ## Discord Commands
 
 | Command | Description |
 |---|---|
 | `/setup` | Post the activity tracker panel in the current channel |
-| `/addactivity` | Add a custom activity for the server |
-| `/removeactivity` | Remove a custom activity |
-| `/streak [user]` | Show streak stats and 30-day activity heatmap |
-| `/leaderboard` | Show top 10 current streaks and all-time bests |
-| `/backfill <date> <activity>` | Log an activity for a past date and recalculate streak |
+| `/addactivity <name> <emoji>` | Add a custom activity for this server |
+| `/removeactivity <name>` | Remove a custom activity (with autocomplete) |
+| `/streak [user]` | Streak stats and 30-day activity heatmap |
+| `/leaderboard` | Top 10 current streaks and all-time bests |
+| `/backfill <date> <activity>` | Log a past date and recompute the streak |
+
+---
+
+## Deployment
+
+### One-time setup
+
+**1. Bootstrap CDK** in your AWS account:
+
+```bash
+cd infra && npx cdk bootstrap aws://<account-id>/ap-south-1
+```
+
+**2. Create the Discord SSM parameter:**
+
+```bash
+aws ssm put-parameter \
+  --name "/spotter/dev/discord" \
+  --type SecureString \
+  --value '{"botToken":"...","publicKey":"...","applicationId":"..."}'
+```
+
+**3. Set up GitHub Actions OIDC** (one-time, no stored credentials):
+
+Create an IAM OIDC identity provider for `token.actions.githubusercontent.com`, then create an IAM role `GitHubActionsRole` with CDK deploy permissions and a trust policy scoped to this repository. Add the role ARN as a GitHub secret: `AWS_ROLE_ARN`.
+
+### Deploy
+
+```bash
+# Dev
+npm run infra:deploy:dev
+
+# Prod (via GitHub Actions — requires manual approval in GitHub environment "prod")
+git push origin main
+```
+
+### CI/CD pipeline
+
+| Trigger | Action |
+|---|---|
+| Pull request to `main` | Lint → Test → Build → CDK synth |
+| Merge to `main` | Deploy dev (automatic) → Deploy prod (manual approval) |
+
+---
 
 ## Project Structure
 
 ```
-src/
-  discord/          # Interaction handler, command routing
-  activity/         # Activity CRUD
-  tracking/         # Activity log repository, streak computation
-  consumer/         # SQS consumer service
-  sqs/              # SQS producer service
-  panel/            # Tracker panel builder and poster
-  common/
-    config/         # Discord credentials via SSM
-    dynamodb/       # DynamoDB wrapper service
-    types/          # dynamo.types.ts, sqs.types.ts
-  handlers/
-    sqs-consumer.handler.ts  # Lambda entry point for SQS consumer
-  lambda.ts                  # Lambda entry point for API
-infra/              # AWS CDK stack
-scripts/            # Local dev and command registration scripts
-legacy/             # Original Discord.js bot (reference only)
+├── src/
+│   ├── lambda.ts                       # API Lambda entry point
+│   ├── app.module.ts
+│   ├── discord/                        # Interaction handler, signature guard, command routing
+│   ├── activity/                       # Activity CRUD (/addactivity, /removeactivity)
+│   ├── tracking/                       # Log repository, streak service, streak repository
+│   ├── leaderboard/                    # Leaderboard service
+│   ├── panel/                          # Panel builder, poster, channel repository
+│   ├── consumer/                       # SQS consumer service
+│   ├── scheduler/                      # Daily task service (streak reset, panel repost)
+│   ├── sqs/                            # SQS producer
+│   ├── handlers/
+│   │   ├── sqs-consumer.handler.ts     # Consumer Lambda entry point
+│   │   └── scheduler.handler.ts        # Scheduler Lambda entry point
+│   └── common/
+│       ├── config/                     # Discord credentials via SSM
+│       ├── dynamodb/                   # DynamoDB DocumentClient wrapper
+│       └── types/                      # dynamo.types.ts, sqs.types.ts
+├── infra/
+│   ├── bin/infra.ts
+│   └── lib/
+│       ├── spotter-stack.ts
+│       └── constructs/
+│           ├── api.ts                  # API Lambda + Consumer Lambda + API Gateway
+│           ├── database.ts             # DynamoDB table + GSI
+│           ├── queue.ts                # SQS + DLQ
+│           ├── scheduler.ts            # Scheduler Lambda + EventBridge Schedule
+│           ├── secrets.ts              # SSM parameter reference
+│           └── monitoring.ts           # CloudWatch alarms
+├── scripts/
+│   ├── register-commands.ts            # Slash command registration
+│   ├── setup-local.ts                  # LocalStack provisioning
+│   └── run-consumer.ts                 # Local SQS polling
+├── legacy/                             # Original Discord.js bot (reference)
+└── .github/workflows/
+    ├── ci.yml
+    └── deploy.yml
 ```
+
+---
+
+## Development
+
+### Commands
+
+| Command | Description |
+|---|---|
+| `npm run local` | First run — start Docker, provision, run app |
+| `npm run dev` | Start API + consumer (Docker already running) |
+| `npm run build` | TypeScript compile |
+| `npm run lint` | ESLint with auto-fix |
+| `npm run test` | Unit tests |
+| `npm run commands:register` | Register slash commands with Discord |
+| `npm run infra:synth` | Synthesize CloudFormation template |
+| `npm run infra:diff:dev` | Diff against deployed dev stack |
+
+### DynamoDB single-table key design
+
+```
+Entity          PK                SK                          GSI1PK              GSI1SK
+──────────────────────────────────────────────────────────────────────────────────────────
+Activity        GUILD#<id>        ACTIVITY#<name>             —                   —
+Activity log    GUILD#<id>        LOG#<date>#<userId>#<act>   USER#<userId>       LOG#<guildId>#<date>
+Streak          GUILD#<id>        STREAK#<userId>             LEADERBOARD#<id>    STREAK#<00015>
+Channel         GUILD#<id>        CHANNEL#<channelId>         —                   —
+```
+
+---
+
+## License
+
+MIT
