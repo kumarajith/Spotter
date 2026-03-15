@@ -8,6 +8,8 @@ import {
   GetCommandInput,
   QueryCommand,
   QueryCommandInput,
+  ScanCommand,
+  ScanCommandInput,
   DeleteCommand,
   DeleteCommandInput,
   TransactWriteCommand,
@@ -42,6 +44,10 @@ export class DynamoService {
 
   query(params: Omit<QueryCommandInput, 'TableName'>) {
     return this.client.send(new QueryCommand({ ...params, TableName: this.tableName }));
+  }
+
+  scan(params: Omit<ScanCommandInput, 'TableName'>) {
+    return this.client.send(new ScanCommand({ ...params, TableName: this.tableName }));
   }
 
   delete(key: Record<string, unknown>, extra?: Omit<DeleteCommandInput, 'TableName' | 'Key'>) {

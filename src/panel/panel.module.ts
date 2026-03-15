@@ -6,6 +6,6 @@ import { PanelService } from './panel.service';
 @Module({
   imports: [ActivityModule],
   providers: [PanelRepository, PanelService],
-  exports: [PanelService],
+  exports: [PanelService, PanelRepository],
 })
 export class PanelModule {}

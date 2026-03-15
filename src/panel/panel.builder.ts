@@ -1,6 +1,6 @@
 import { ActionRowBuilder, ButtonBuilder, EmbedBuilder } from '@discordjs/builders';
 import { ButtonStyle } from 'discord-api-types/v10';
-import { ActivityItem } from '../common/types/dynamo.types';
+import { ActivityItem, StreakItem } from '../common/types/dynamo.types';
 
 export interface PanelPayload {
   embeds?: ReturnType<EmbedBuilder['toJSON']>[];
@@ -46,4 +46,35 @@ export function buildPanel(activities: ActivityItem[]): PanelPayload[] {
     { embeds: [embed.toJSON()], components: serializedRows.slice(0, 5) },
     { components: serializedRows.slice(5, 10) },
   ];
+}
+
+export function buildStreakSummaryEmbed(streaks: StreakItem[]): ReturnType<EmbedBuilder['toJSON']> {
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Group by currentStreak descending
+  const sorted = [...streaks].sort((a, b) => b.currentStreak - a.currentStreak);
+
+  // Group consecutive entries with the same streak length
+  const groups = new Map<number, string[]>();
+  for (const item of sorted) {
+    const userId = item.userId;
+    const existing = groups.get(item.currentStreak) ?? [];
+    existing.push(`<@${userId}>`);
+    groups.set(item.currentStreak, existing);
+  }
+
+  const lines: string[] = [];
+  for (const [streak, mentions] of groups) {
+    const icon = streak >= 14 ? '🔥' : '💪';
+    lines.push(`${icon} **${streak} day${streak === 1 ? '' : 's'}** — ${mentions.join(', ')}`);
+  }
+
+  const description =
+    lines.length > 0 ? lines.join('\n') : 'No active streaks today. Time to get moving! 💪';
+
+  return new EmbedBuilder()
+    .setTitle(`📊 Active Streaks — ${today}`)
+    .setDescription(description)
+    .setColor(0xed4245)
+    .toJSON();
 }

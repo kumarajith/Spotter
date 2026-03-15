@@ -17,12 +17,13 @@ export interface ApiConstructProps {
 
 export class ApiConstruct extends Construct {
   public readonly apiLambda: lambda.Function;
+  public readonly consumerLambda: lambda.Function;
 
   constructor(scope: Construct, id: string, props: ApiConstructProps) {
     super(scope, id);
 
     this.apiLambda = new lambda.Function(this, 'ApiHandler', {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: lambda.Runtime.NODEJS_24_X,
       handler: 'lambda.handler',
       code: lambda.Code.fromAsset('../dist'),
       memorySize: 512,
@@ -39,8 +40,8 @@ export class ApiConstruct extends Construct {
     props.queue.grantSendMessages(this.apiLambda);
     props.discordParam.grantRead(this.apiLambda);
 
-    const consumerLambda = new lambda.Function(this, 'SqsConsumer', {
-      runtime: lambda.Runtime.NODEJS_20_X,
+    this.consumerLambda = new lambda.Function(this, 'SqsConsumer', {
+      runtime: lambda.Runtime.NODEJS_24_X,
       handler: 'handlers/sqs-consumer.handler',
       code: lambda.Code.fromAsset('../dist'),
       memorySize: 256,
@@ -52,10 +53,10 @@ export class ApiConstruct extends Construct {
       },
     });
 
-    props.table.grantReadWriteData(consumerLambda);
-    props.discordParam.grantRead(consumerLambda);
+    props.table.grantReadWriteData(this.consumerLambda);
+    props.discordParam.grantRead(this.consumerLambda);
 
-    consumerLambda.addEventSource(new SqsEventSource(props.queue, { batchSize: 1 }));
+    this.consumerLambda.addEventSource(new SqsEventSource(props.queue, { batchSize: 1 }));
 
     const httpApi = new apigateway.HttpApi(this, 'HttpApi', {
       apiName: `spotter-api-${props.environment}`,

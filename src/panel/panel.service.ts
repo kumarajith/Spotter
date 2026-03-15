@@ -16,14 +16,20 @@ export class PanelService {
 
   async setup(guildId: string, channelId: string): Promise<void> {
     await this.activityService.seedDefaults(guildId);
-    const activities = await this.activityService.getActivities(guildId);
+    await this.repost(guildId, channelId);
+  }
 
+  async repost(guildId: string, channelId: string, lastPanelMessageId?: string): Promise<void> {
+    const activities = await this.activityService.getActivities(guildId);
     const rest = new REST({ version: '10' }).setToken(this.discordConfig.botToken);
 
-    const existing = await this.panelRepository.getChannel(guildId, channelId);
-    if (existing?.lastPanelMessageId) {
+    const oldMessageId =
+      lastPanelMessageId ??
+      (await this.panelRepository.getChannel(guildId, channelId))?.lastPanelMessageId;
+
+    if (oldMessageId) {
       try {
-        await rest.delete(Routes.channelMessage(channelId, existing.lastPanelMessageId));
+        await rest.delete(Routes.channelMessage(channelId, oldMessageId));
       } catch {
         // Message already deleted or bot lacks access — proceed
       }
