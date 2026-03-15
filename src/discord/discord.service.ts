@@ -16,7 +16,7 @@ import { DiscordConfigService } from '../common/config/discord-config-service';
 import { SqsService } from '../sqs/sqs.service';
 import { StreakRepository } from '../tracking/streak.repository';
 import { TrackingRepository } from '../tracking/tracking.repository';
-import { ActivityLoggedMessage, BackfillActivityMessage } from '../common/types/dynamo.types';
+import { ActivityLoggedMessage, BackfillActivityMessage } from '../common/types/sqs.types';
 import { COMMANDS } from './commands';
 import { autocompleteResult, embedResponse, ephemeral, getStringOption } from './discord.utils';
 

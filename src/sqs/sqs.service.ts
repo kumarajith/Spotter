@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
-import { SqsMessage } from '../common/types/dynamo.types';
+import { SqsMessage } from '../common/types/sqs.types';
 
 @Injectable()
 export class SqsService {

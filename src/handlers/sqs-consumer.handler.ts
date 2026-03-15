@@ -2,7 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { SQSHandler } from 'aws-lambda';
 import { ConsumerModule } from '../consumer/consumer.module';
 import { ConsumerService } from '../consumer/consumer.service';
-import { SqsMessage } from '../common/types/dynamo.types';
+import { SqsMessage } from '../common/types/sqs.types';
 
 let consumerService: ConsumerService;
 

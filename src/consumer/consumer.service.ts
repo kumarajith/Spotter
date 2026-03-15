@@ -5,7 +5,7 @@ import {
   ActivityLoggedMessage,
   BackfillActivityMessage,
   SqsMessage,
-} from '../common/types/dynamo.types';
+} from '../common/types/sqs.types';
 
 @Injectable()
 export class ConsumerService {
