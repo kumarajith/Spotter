@@ -20,7 +20,12 @@ export interface ActivityLogItem {
   date: string;
   loggedAt: string;
   entityType: 'LOG';
-  ttl: number; // unix epoch, loggedAt + 730 days
+  ttl?: number; // optional — not enforced; streaks are permanent
+}
+
+export interface PendingBreakState {
+  preBreakStreak: number;
+  preBreakConsecutiveRest: number;
 }
 
 export interface StreakItem {
@@ -36,7 +41,23 @@ export interface StreakItem {
   lastLoggedDate: string;
   updatedAt: string;
   entityType: 'STREAK';
+  consecutiveRestOnlyDays: number;
+  lastDayHasNonRest: boolean;
+  pendingBreakState?: PendingBreakState;
 }
+
+export interface ActivityLoggedMessage {
+  type: 'ACTIVITY_LOGGED';
+  guildId: string;
+  userId: string;
+  activityName: string; // lowercased (e.g. "push", "rest")
+  timestamp: string; // ISO string — used as loggedAt and to derive date
+  interactionToken: string;
+  applicationId: string;
+}
+
+// Discriminated union — extend with | NewMessageType as new message types are added
+export type SqsMessage = ActivityLoggedMessage;
 
 export interface TrackedChannelItem {
   PK: string; // GUILD#<guildId>

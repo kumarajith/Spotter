@@ -6,10 +6,14 @@ import {
   APIInteraction,
   APIMessageComponentInteraction,
   ComponentType,
+  InteractionResponseType,
+  MessageFlags,
 } from 'discord-api-types/v10';
 import { ActivityService } from '../activity/activity.service';
 import { PanelService } from '../panel/panel.service';
-import { TrackingService } from '../tracking/tracking.service';
+import { DiscordConfigService } from '../common/config/discord-config-service';
+import { SqsService } from '../sqs/sqs.service';
+import { ActivityLoggedMessage } from '../common/types/dynamo.types';
 import { COMMANDS } from './commands';
 import { autocompleteResult, ephemeral, getStringOption } from './discord.utils';
 
@@ -18,7 +22,8 @@ export class DiscordService {
   constructor(
     private readonly activityService: ActivityService,
     private readonly panelService: PanelService,
-    private readonly trackingService: TrackingService,
+    private readonly discordConfig: DiscordConfigService,
+    private readonly sqsService: SqsService,
   ) {}
 
   async handleCommand(interaction: APIApplicationCommandInteraction) {
@@ -114,15 +119,24 @@ export class DiscordService {
     }
 
     const activityName = interaction.data.custom_id.slice('log_activity:'.length);
-    const { alreadyLogged } = await this.trackingService.log(guildId, userId, activityName);
 
-    const label = activityName.charAt(0).toUpperCase() + activityName.slice(1);
+    const message: ActivityLoggedMessage = {
+      type: 'ACTIVITY_LOGGED',
+      guildId,
+      userId,
+      activityName,
+      timestamp: new Date().toISOString(),
+      interactionToken: interaction.token,
+      applicationId: this.discordConfig.applicationId,
+    };
 
-    if (alreadyLogged) {
-      return ephemeral(`⚠️ You already logged **${label}** today.`);
-    }
+    await this.sqsService.send(message);
 
-    return ephemeral(`✅ Logged **${label}** for today! Keep it up 💪`);
+    // Ephemeral deferred response — Discord shows nothing visible; consumer sends the followup
+    return {
+      type: InteractionResponseType.DeferredChannelMessageWithSource,
+      data: { flags: MessageFlags.Ephemeral },
+    };
   }
 
   private async handleAddActivity(

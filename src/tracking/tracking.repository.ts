@@ -2,8 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { DynamoService } from '../common/dynamodb/dynamodb.service';
 import { ActivityLogItem } from '../common/types/dynamo.types';
 
-const LOG_TTL_DAYS = 90;
-
 @Injectable()
 export class TrackingRepository {
   constructor(private readonly dynamo: DynamoService) {}
@@ -14,9 +12,6 @@ export class TrackingRepository {
     activityName: string,
     date: string,
   ): Promise<{ alreadyLogged: boolean }> {
-    const ttl =
-      Math.floor(new Date(`${date}T00:00:00Z`).getTime() / 1000) + LOG_TTL_DAYS * 24 * 60 * 60;
-
     const item: ActivityLogItem = {
       PK: `GUILD#${guildId}`,
       SK: `LOG#${date}#${userId}#${activityName}`,
@@ -28,7 +23,6 @@ export class TrackingRepository {
       date,
       loggedAt: new Date().toISOString(),
       entityType: 'LOG',
-      ttl,
     };
 
     try {
