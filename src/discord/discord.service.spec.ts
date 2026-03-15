@@ -56,6 +56,12 @@ function stringOption(name: string, value: string) {
   return { name, type: ApplicationCommandOptionType.String, value };
 }
 
+/** Narrow the union returned by handleCommand/handleComponent for ephemeral results. */
+interface EphemeralData {
+  content: string;
+  flags: MessageFlags;
+}
+
 // ---------------------------------------------------------------------------
 // Test suite
 // ---------------------------------------------------------------------------
@@ -64,10 +70,8 @@ describe('DiscordService', () => {
   let service: DiscordService;
   let activityService: jest.Mocked<ActivityService>;
   let panelService: jest.Mocked<PanelService>;
-  let discordConfig: jest.Mocked<DiscordConfigService>;
   let sqsService: jest.Mocked<SqsService>;
   let streakRepository: jest.Mocked<StreakRepository>;
-  let trackingRepository: jest.Mocked<TrackingRepository>;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -120,10 +124,8 @@ describe('DiscordService', () => {
     service = module.get(DiscordService);
     activityService = module.get(ActivityService);
     panelService = module.get(PanelService);
-    discordConfig = module.get(DiscordConfigService);
     sqsService = module.get(SqsService);
     streakRepository = module.get(StreakRepository);
-    trackingRepository = module.get(TrackingRepository);
   });
 
   // -----------------------------------------------------------------------
@@ -139,8 +141,8 @@ describe('DiscordService', () => {
       const result = await service.handleCommand(interaction as any);
 
       expect(result.type).toBe(InteractionResponseType.ChannelMessageWithSource);
-      expect(result.data.content).toContain('can only be used in a server');
-      expect(result.data.flags).toBe(MessageFlags.Ephemeral);
+      expect((result.data as EphemeralData).content).toContain('can only be used in a server');
+      expect((result.data as EphemeralData).flags).toBe(MessageFlags.Ephemeral);
     });
 
     it('returns ephemeral "not implemented" for unknown command', async () => {
@@ -149,8 +151,8 @@ describe('DiscordService', () => {
       const result = await service.handleCommand(interaction as any);
 
       expect(result.type).toBe(InteractionResponseType.ChannelMessageWithSource);
-      expect(result.data.content).toContain('not implemented');
-      expect(result.data.flags).toBe(MessageFlags.Ephemeral);
+      expect((result.data as EphemeralData).content).toContain('not implemented');
+      expect((result.data as EphemeralData).flags).toBe(MessageFlags.Ephemeral);
     });
   });
 
@@ -169,8 +171,8 @@ describe('DiscordService', () => {
 
       expect(activityService.addActivity).toHaveBeenCalledWith('guild-1', 'Push', '💪', 'user-1');
       expect(result.type).toBe(InteractionResponseType.ChannelMessageWithSource);
-      expect(result.data.content).toContain('Added activity');
-      expect(result.data.flags).toBe(MessageFlags.Ephemeral);
+      expect((result.data as EphemeralData).content).toContain('Added activity');
+      expect((result.data as EphemeralData).flags).toBe(MessageFlags.Ephemeral);
     });
 
     it('returns error when activity already exists', async () => {
@@ -183,8 +185,8 @@ describe('DiscordService', () => {
       const result = await service.handleCommand(interaction as any);
 
       expect(result.type).toBe(InteractionResponseType.ChannelMessageWithSource);
-      expect(result.data.content).toContain('already exists');
-      expect(result.data.flags).toBe(MessageFlags.Ephemeral);
+      expect((result.data as EphemeralData).content).toContain('already exists');
+      expect((result.data as EphemeralData).flags).toBe(MessageFlags.Ephemeral);
     });
   });
 
@@ -202,8 +204,8 @@ describe('DiscordService', () => {
 
       expect(activityService.removeActivity).toHaveBeenCalledWith('guild-1', 'Push');
       expect(result.type).toBe(InteractionResponseType.ChannelMessageWithSource);
-      expect(result.data.content).toContain('Removed');
-      expect(result.data.flags).toBe(MessageFlags.Ephemeral);
+      expect((result.data as EphemeralData).content).toContain('Removed');
+      expect((result.data as EphemeralData).flags).toBe(MessageFlags.Ephemeral);
     });
   });
 
@@ -219,8 +221,8 @@ describe('DiscordService', () => {
 
       expect(panelService.setup).toHaveBeenCalledWith('guild-1', 'channel-1');
       expect(result.type).toBe(InteractionResponseType.ChannelMessageWithSource);
-      expect(result.data.content).toContain('Tracker panel posted');
-      expect(result.data.flags).toBe(MessageFlags.Ephemeral);
+      expect((result.data as EphemeralData).content).toContain('Tracker panel posted');
+      expect((result.data as EphemeralData).flags).toBe(MessageFlags.Ephemeral);
     });
 
     it('returns error when channel is missing', async () => {
@@ -232,8 +234,8 @@ describe('DiscordService', () => {
 
       expect(panelService.setup).not.toHaveBeenCalled();
       expect(result.type).toBe(InteractionResponseType.ChannelMessageWithSource);
-      expect(result.data.content).toContain('Could not determine the channel');
-      expect(result.data.flags).toBe(MessageFlags.Ephemeral);
+      expect((result.data as EphemeralData).content).toContain('Could not determine the channel');
+      expect((result.data as EphemeralData).flags).toBe(MessageFlags.Ephemeral);
     });
   });
 
@@ -283,7 +285,7 @@ describe('DiscordService', () => {
 
       expect(sqsService.send).not.toHaveBeenCalled();
       expect(result.type).toBe(InteractionResponseType.ChannelMessageWithSource);
-      expect((result.data as any).content).toContain('Invalid activity');
+      expect((result.data as EphemeralData).content).toContain('Invalid activity');
     });
   });
 
@@ -302,8 +304,8 @@ describe('DiscordService', () => {
 
       expect(sqsService.send).not.toHaveBeenCalled();
       expect(result.type).toBe(InteractionResponseType.ChannelMessageWithSource);
-      expect(result.data.content).toContain('Invalid date');
-      expect(result.data.flags).toBe(MessageFlags.Ephemeral);
+      expect((result.data as EphemeralData).content).toContain('Invalid date');
+      expect((result.data as EphemeralData).flags).toBe(MessageFlags.Ephemeral);
     });
 
     it('returns error for future date', async () => {
@@ -316,8 +318,8 @@ describe('DiscordService', () => {
 
       expect(sqsService.send).not.toHaveBeenCalled();
       expect(result.type).toBe(InteractionResponseType.ChannelMessageWithSource);
-      expect(result.data.content).toContain('Invalid date');
-      expect(result.data.flags).toBe(MessageFlags.Ephemeral);
+      expect((result.data as EphemeralData).content).toContain('Invalid date');
+      expect((result.data as EphemeralData).flags).toBe(MessageFlags.Ephemeral);
     });
 
     it('sends SQS message and returns deferred ephemeral for valid backfill', async () => {
@@ -356,7 +358,7 @@ describe('DiscordService', () => {
       const result = await service.handleCommand(interaction as any);
 
       expect(result.type).toBe(InteractionResponseType.ChannelMessageWithSource);
-      expect(result.data.content).toContain('No streaks recorded');
+      expect((result.data as EphemeralData).content).toContain('No streaks recorded');
     });
 
     it('returns embed with leaderboard data when streaks exist', async () => {
@@ -373,7 +375,8 @@ describe('DiscordService', () => {
 
       expect(result.type).toBe(InteractionResponseType.ChannelMessageWithSource);
       expect(result.data).toHaveProperty('embeds');
-      expect((result.data as any).embeds[0].title).toContain('Leaderboard');
+      const embeds = (result.data as { embeds: { title: string }[] }).embeds;
+      expect(embeds[0].title).toContain('Leaderboard');
     });
   });
 });

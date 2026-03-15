@@ -154,6 +154,7 @@ function computeStreak(logs: SqliteLog[]): {
   // Unique dates DESC
   const allDates = [...new Set(logs.map((r) => r.logged_date))].sort().reverse();
 
+  // Use UTC explicitly so streak computation is consistent regardless of where the script runs
   const today = new Date().toISOString().slice(0, 10);
   const yesterday = addDays(today, -1);
 
@@ -228,14 +229,36 @@ async function batchWrite(
   let written = 0;
   for (let i = 0; i < items.length; i += 25) {
     const chunk = items.slice(i, i + 25);
-    const requests = chunk.map((item) => ({ PutRequest: { Item: item } }));
+    let requests = chunk.map((item) => ({ PutRequest: { Item: item } }));
 
-    await docClient.send(
-      new BatchWriteCommand({
-        RequestItems: { [tableName]: requests },
-      }),
-    );
-    written += chunk.length;
+    // Retry loop for unprocessed items (DynamoDB throttling)
+    let attempt = 0;
+    while (requests.length > 0) {
+      if (attempt > 0) {
+        const backoff = Math.min(1000 * 2 ** attempt, 30_000);
+        console.log(
+          `  Retrying ${requests.length} unprocessed ${label} items (attempt ${attempt}, backoff ${backoff}ms)`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, backoff));
+      }
+
+      const result = await docClient.send(
+        new BatchWriteCommand({
+          RequestItems: { [tableName]: requests },
+        }),
+      );
+
+      const unprocessed = result.UnprocessedItems?.[tableName] ?? [];
+      written += requests.length - unprocessed.length;
+      requests = unprocessed as typeof requests;
+      attempt++;
+
+      if (attempt > 8 && requests.length > 0) {
+        throw new Error(
+          `Failed to write ${requests.length} ${label} items after ${attempt} retries`,
+        );
+      }
+    }
   }
 
   console.log(`  Wrote ${written} ${label} items`);
@@ -266,6 +289,7 @@ async function migrate() {
   const docClient = DynamoDBDocumentClient.from(dynamoClient);
 
   const guildFilter = guild ? `WHERE guild_id = ?` : '';
+  const guildFilterAliased = guild ? `WHERE al.guild_id = ?` : '';
   const guildParams = guild ? [guild] : [];
 
   const now = new Date().toISOString();
@@ -274,126 +298,128 @@ async function migrate() {
   let totalChannels = 0;
   let totalStreaks = 0;
 
-  // ── 1. Activities ──────────────────────────────────────────────────────────
+  try {
+    // ── 1. Activities ────────────────────────────────────────────────────────
 
-  console.log('1. Migrating activities...');
-  const activities = db
-    .prepare(`SELECT * FROM activities ${guildFilter}`)
-    .all(...guildParams) as SqliteActivity[];
+    console.log('1. Migrating activities...');
+    const activities = db
+      .prepare(`SELECT * FROM activities ${guildFilter}`)
+      .all(...guildParams) as SqliteActivity[];
 
-  const activityItems = activities.map((a) => ({
-    PK: `GUILD#${a.guild_id}`,
-    SK: `ACTIVITY#${a.name.toLowerCase()}`,
-    displayName: a.name,
-    emoji: a.emoji ?? '',
-    isDefault: a.is_default === 1,
-    createdBy: a.created_by ?? 'system',
-    createdAt: now,
-    entityType: 'ACTIVITY',
-  }));
+    const activityItems = activities.map((a) => ({
+      PK: `GUILD#${a.guild_id}`,
+      SK: `ACTIVITY#${a.name.toLowerCase()}`,
+      displayName: a.name,
+      emoji: a.emoji ?? '',
+      isDefault: a.is_default === 1,
+      createdBy: a.created_by ?? 'system',
+      createdAt: now,
+      entityType: 'ACTIVITY',
+    }));
 
-  totalActivities = await batchWrite(docClient, tableName, activityItems, dryRun, 'activity');
+    totalActivities = await batchWrite(docClient, tableName, activityItems, dryRun, 'activity');
 
-  // ── 2. Activity logs ───────────────────────────────────────────────────────
+    // ── 2. Activity logs ─────────────────────────────────────────────────────
 
-  console.log('2. Migrating activity logs...');
-  const logs = db
-    .prepare(
-      `SELECT al.guild_id, al.user_id, a.name AS activity_name, al.logged_date, al.logged_at
-       FROM activity_logs al
-       JOIN activities a ON al.activity_id = a.id
-       ${guildFilter.replace('guild_id', 'al.guild_id')}
-       ORDER BY al.logged_date DESC`,
-    )
-    .all(...guildParams) as SqliteLog[];
+    console.log('2. Migrating activity logs...');
+    const logs = db
+      .prepare(
+        `SELECT al.guild_id, al.user_id, a.name AS activity_name, al.logged_date, al.logged_at
+         FROM activity_logs al
+         JOIN activities a ON al.activity_id = a.id
+         ${guildFilterAliased}
+         ORDER BY al.logged_date DESC`,
+      )
+      .all(...guildParams) as SqliteLog[];
 
-  const logItems = logs.map((l) => {
-    const actName = l.activity_name.toLowerCase();
-    return {
-      PK: `GUILD#${l.guild_id}`,
-      SK: `LOG#${l.logged_date}#${l.user_id}#${actName}`,
-      GSI1PK: `USER#${l.user_id}`,
-      GSI1SK: `LOG#${l.guild_id}#${l.logged_date}`,
-      guildId: l.guild_id,
-      userId: l.user_id,
-      activityName: actName,
-      date: l.logged_date,
-      loggedAt: l.logged_at || now,
-      entityType: 'LOG',
-    };
-  });
-
-  totalLogs = await batchWrite(docClient, tableName, logItems, dryRun, 'log');
-
-  // ── 3. Tracked channels ───────────────────────────────────────────────────
-
-  console.log('3. Migrating tracked channels...');
-  const channels = db
-    .prepare(`SELECT * FROM tracked_channels ${guildFilter}`)
-    .all(...guildParams) as SqliteChannel[];
-
-  const channelItems = channels.map((c) => ({
-    PK: `GUILD#${c.guild_id}`,
-    SK: `CHANNEL#${c.channel_id}`,
-    ...(c.last_panel_message_id && { lastPanelMessageId: c.last_panel_message_id }),
-    createdAt: now,
-    entityType: 'CHANNEL',
-  }));
-
-  totalChannels = await batchWrite(docClient, tableName, channelItems, dryRun, 'channel');
-
-  // ── 4. Streaks (computed from logs) ────────────────────────────────────────
-
-  console.log('4. Computing and migrating streaks...');
-
-  // Group logs by guild+user
-  const userLogs = new Map<string, SqliteLog[]>();
-  for (const log of logs) {
-    const key = `${log.guild_id}|${log.user_id}`;
-    if (!userLogs.has(key)) userLogs.set(key, []);
-    userLogs.get(key)!.push(log);
-  }
-
-  const streakItems: Record<string, unknown>[] = [];
-  for (const [key, userLogEntries] of userLogs) {
-    const [guildId, userId] = key.split('|');
-    const streak = computeStreak(userLogEntries);
-
-    if (!streak.lastLoggedDate) continue;
-
-    const padded = padStreak(streak.currentStreak);
-    streakItems.push({
-      PK: `GUILD#${guildId}`,
-      SK: `STREAK#${userId}`,
-      GSI1PK: `LEADERBOARD#${guildId}`,
-      GSI1SK: `STREAK#${padded}`,
-      guildId,
-      userId,
-      currentStreak: streak.currentStreak,
-      longestStreak: streak.longestStreak,
-      currentStreakPadded: padded,
-      lastLoggedDate: streak.lastLoggedDate,
-      updatedAt: now,
-      entityType: 'STREAK',
-      consecutiveRestOnlyDays: streak.consecutiveRestOnlyDays,
-      lastDayHasNonRest: streak.lastDayHasNonRest,
+    const logItems = logs.map((l) => {
+      const actName = l.activity_name.toLowerCase();
+      return {
+        PK: `GUILD#${l.guild_id}`,
+        SK: `LOG#${l.logged_date}#${l.user_id}#${actName}`,
+        GSI1PK: `USER#${l.user_id}`,
+        GSI1SK: `LOG#${l.guild_id}#${l.logged_date}`,
+        guildId: l.guild_id,
+        userId: l.user_id,
+        activityName: actName,
+        date: l.logged_date,
+        loggedAt: l.logged_at || now,
+        entityType: 'LOG',
+      };
     });
+
+    totalLogs = await batchWrite(docClient, tableName, logItems, dryRun, 'log');
+
+    // ── 3. Tracked channels ──────────────────────────────────────────────────
+
+    console.log('3. Migrating tracked channels...');
+    const channels = db
+      .prepare(`SELECT * FROM tracked_channels ${guildFilter}`)
+      .all(...guildParams) as SqliteChannel[];
+
+    const channelItems = channels.map((c) => ({
+      PK: `GUILD#${c.guild_id}`,
+      SK: `CHANNEL#${c.channel_id}`,
+      ...(c.last_panel_message_id && { lastPanelMessageId: c.last_panel_message_id }),
+      createdAt: now,
+      entityType: 'CHANNEL',
+    }));
+
+    totalChannels = await batchWrite(docClient, tableName, channelItems, dryRun, 'channel');
+
+    // ── 4. Streaks (computed from logs) ──────────────────────────────────────
+
+    console.log('4. Computing and migrating streaks...');
+
+    // Group logs by guild+user
+    const userLogs = new Map<string, SqliteLog[]>();
+    for (const log of logs) {
+      const key = `${log.guild_id}|${log.user_id}`;
+      if (!userLogs.has(key)) userLogs.set(key, []);
+      userLogs.get(key)!.push(log);
+    }
+
+    const streakItems: Record<string, unknown>[] = [];
+    for (const [key, userLogEntries] of userLogs) {
+      const [guildId, userId] = key.split('|');
+      const streak = computeStreak(userLogEntries);
+
+      if (!streak.lastLoggedDate) continue;
+
+      const padded = padStreak(streak.currentStreak);
+      streakItems.push({
+        PK: `GUILD#${guildId}`,
+        SK: `STREAK#${userId}`,
+        GSI1PK: `LEADERBOARD#${guildId}`,
+        GSI1SK: `STREAK#${padded}`,
+        guildId,
+        userId,
+        currentStreak: streak.currentStreak,
+        longestStreak: streak.longestStreak,
+        currentStreakPadded: padded,
+        lastLoggedDate: streak.lastLoggedDate,
+        updatedAt: now,
+        entityType: 'STREAK',
+        consecutiveRestOnlyDays: streak.consecutiveRestOnlyDays,
+        lastDayHasNonRest: streak.lastDayHasNonRest,
+      });
+    }
+
+    totalStreaks = await batchWrite(docClient, tableName, streakItems, dryRun, 'streak');
+
+    // ── Summary ──────────────────────────────────────────────────────────────
+
+    console.log('');
+    console.log('=== Migration Summary ===');
+    console.log(`  Activities: ${totalActivities}`);
+    console.log(`  Logs:       ${totalLogs}`);
+    console.log(`  Channels:   ${totalChannels}`);
+    console.log(`  Streaks:    ${totalStreaks}`);
+    console.log(`  Total:      ${totalActivities + totalLogs + totalChannels + totalStreaks}`);
+    if (dryRun) console.log('  (DRY RUN — nothing was written)');
+  } finally {
+    db.close();
   }
-
-  totalStreaks = await batchWrite(docClient, tableName, streakItems, dryRun, 'streak');
-
-  // ── Summary ────────────────────────────────────────────────────────────────
-
-  db.close();
-
-  console.log('');
-  console.log('=== Migration Summary ===');
-  console.log(`  Activities: ${totalActivities}`);
-  console.log(`  Logs:       ${totalLogs}`);
-  console.log(`  Channels:   ${totalChannels}`);
-  console.log(`  Streaks:    ${totalStreaks}`);
-  console.log(`  Total:      ${totalActivities + totalLogs + totalChannels + totalStreaks}`);
-  if (dryRun) console.log('  (DRY RUN — nothing was written)');
 }
 
 migrate().catch((err) => {

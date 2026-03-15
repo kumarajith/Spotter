@@ -15,7 +15,7 @@ describe('DiscordSignatureGuard', () => {
   >;
 
   beforeEach(async () => {
-    mockVerifyKey.mockClear();
+    mockVerifyKey.mockReset();
 
     const module = await Test.createTestingModule({
       providers: [
@@ -42,7 +42,7 @@ describe('DiscordSignatureGuard', () => {
   }
 
   it('returns true when signature is valid', async () => {
-    mockVerifyKey.mockReturnValue(true);
+    mockVerifyKey.mockResolvedValue(true);
     const ctx = makeContext(
       { 'x-signature-ed25519': 'sig', 'x-signature-timestamp': '123' },
       Buffer.from('body'),
@@ -68,5 +68,20 @@ describe('DiscordSignatureGuard', () => {
       'x-signature-timestamp': '123',
     });
     expect(await guard.canActivate(ctx)).toBe(false);
+  });
+
+  it('returns false when signature is invalid', async () => {
+    mockVerifyKey.mockResolvedValue(false);
+    const ctx = makeContext(
+      { 'x-signature-ed25519': 'bad-sig', 'x-signature-timestamp': '123' },
+      Buffer.from('body'),
+    );
+    expect(await guard.canActivate(ctx)).toBe(false);
+    expect(mockVerifyKey).toHaveBeenCalledWith(
+      Buffer.from('body'),
+      'bad-sig',
+      '123',
+      'test-public-key',
+    );
   });
 });

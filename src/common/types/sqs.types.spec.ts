@@ -44,12 +44,12 @@ describe('isValidSqsMessage', () => {
   });
 
   it('rejects missing type', () => {
-    const { type, ...rest } = validActivityLogged;
+    const { type: _type, ...rest } = validActivityLogged;
     expect(isValidSqsMessage(rest)).toBe(false);
   });
 
   it('rejects missing required field', () => {
-    const { guildId, ...rest } = validActivityLogged;
+    const { guildId: _guildId, ...rest } = validActivityLogged;
     expect(isValidSqsMessage(rest)).toBe(false);
   });
 
