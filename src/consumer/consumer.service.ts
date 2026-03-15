@@ -93,19 +93,24 @@ export class ConsumerService {
     await this.deleteOriginalResponse(msg.applicationId, msg.interactionToken);
   }
 
-  private async deleteOriginalResponse(applicationId: string, interactionToken: string): Promise<void> {
+  private async deleteOriginalResponse(
+    applicationId: string,
+    interactionToken: string,
+  ): Promise<void> {
     const url = `https://discord.com/api/v10/webhooks/${applicationId}/${interactionToken}/messages/@original`;
     const response = await fetch(url, { method: 'DELETE' });
     if (!response.ok) {
-      this.logger.error(`Delete original response failed [${response.status}]: ${response.statusText}`);
+      // Non-critical: log but don't throw — the activity was already recorded
+      this.logger.warn(
+        `Delete original response failed [${response.status}]: ${response.statusText}`,
+      );
     }
   }
 
   private async sendChannelMessage(channelId: string, content: string): Promise<void> {
     const botToken = process.env.DISCORD_BOT_TOKEN;
     if (!botToken) {
-      this.logger.error('DISCORD_BOT_TOKEN is not set — cannot send channel message');
-      return;
+      throw new Error('DISCORD_BOT_TOKEN is not set — cannot send channel message');
     }
 
     const url = `https://discord.com/api/v10/channels/${channelId}/messages`;
@@ -119,7 +124,7 @@ export class ConsumerService {
     });
 
     if (!response.ok) {
-      this.logger.error(`Channel message failed [${response.status}]: ${response.statusText}`);
+      throw new Error(`Channel message failed [${response.status}]: ${response.statusText}`);
     }
   }
 
@@ -137,7 +142,7 @@ export class ConsumerService {
     });
 
     if (!response.ok) {
-      this.logger.error(`Discord followup failed [${response.status}]: ${response.statusText}`);
+      throw new Error(`Discord followup failed [${response.status}]: ${response.statusText}`);
     }
   }
 }

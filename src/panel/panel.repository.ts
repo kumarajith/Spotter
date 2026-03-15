@@ -30,10 +30,19 @@ export class PanelRepository {
    * Uses a Scan — acceptable at hobby scale (< 10 guilds, runs once/day).
    */
   async getAllTrackedChannels(): Promise<TrackedChannelItem[]> {
-    const result = await this.dynamo.scan({
-      FilterExpression: 'begins_with(SK, :skPrefix)',
-      ExpressionAttributeValues: { ':skPrefix': 'CHANNEL#' },
-    });
-    return (result.Items ?? []) as TrackedChannelItem[];
+    const items: TrackedChannelItem[] = [];
+    let lastKey: Record<string, unknown> | undefined;
+
+    do {
+      const result = await this.dynamo.scan({
+        FilterExpression: 'begins_with(SK, :skPrefix)',
+        ExpressionAttributeValues: { ':skPrefix': 'CHANNEL#' },
+        ExclusiveStartKey: lastKey,
+      });
+      items.push(...((result.Items ?? []) as TrackedChannelItem[]));
+      lastKey = result.LastEvaluatedKey as Record<string, unknown> | undefined;
+    } while (lastKey);
+
+    return items;
   }
 }

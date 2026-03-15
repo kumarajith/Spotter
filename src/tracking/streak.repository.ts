@@ -15,7 +15,14 @@ export class StreakRepository {
   }
 
   async putStreak(item: StreakItem): Promise<void> {
-    await this.dynamo.put(item as unknown as Record<string, unknown>);
+    // Enforce GSI1SK padding — ensures leaderboard queries sort correctly
+    const padded = item.currentStreak.toString().padStart(5, '0');
+    const normalized: StreakItem = {
+      ...item,
+      GSI1SK: `STREAK#${padded}`,
+      currentStreakPadded: padded,
+    };
+    await this.dynamo.put(normalized as unknown as Record<string, unknown>);
   }
 
   /**

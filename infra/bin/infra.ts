@@ -3,7 +3,10 @@ import * as cdk from 'aws-cdk-lib';
 import { SpotterStack } from '../lib/spotter-stack';
 
 const app = new cdk.App();
-const env = app.node.tryGetContext('env') || 'dev';
+const env = String(app.node.tryGetContext('env') ?? '');
+if (!['dev', 'prod'].includes(env)) {
+  throw new Error(`Missing or invalid env context: "${env}". Pass -c env=dev or -c env=prod`);
+}
 
 new SpotterStack(app, `Spotter-${env}`, {
   env: {

@@ -45,13 +45,15 @@ export class ActivityRepository {
   }
 
   async seedDefaults(guildId: string): Promise<void> {
-    for (const activity of DEFAULT_ACTIVITIES) {
-      await this.putActivity(guildId, activity.displayName, activity.emoji, true, 'system').catch(
-        (err: Error & { name: string }) => {
-          if (err.name === 'ConditionalCheckFailedException') return;
-          throw err;
-        },
-      );
-    }
+    await Promise.all(
+      DEFAULT_ACTIVITIES.map((activity) =>
+        this.putActivity(guildId, activity.displayName, activity.emoji, true, 'system').catch(
+          (err: Error & { name: string }) => {
+            if (err.name === 'ConditionalCheckFailedException') return;
+            throw err;
+          },
+        ),
+      ),
+    );
   }
 }

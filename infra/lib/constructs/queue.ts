@@ -19,7 +19,7 @@ export class QueueConstruct extends Construct {
 
     this.queue = new sqs.Queue(this, 'ProcessingQueue', {
       queueName: `spotter-queue-${props.environment}`,
-      visibilityTimeout: cdk.Duration.seconds(60),
+      visibilityTimeout: cdk.Duration.seconds(120), // 2x consumer Lambda timeout (60s)
       deadLetterQueue: { queue: this.dlq, maxReceiveCount: 3 },
     });
   }

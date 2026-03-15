@@ -1,8 +1,11 @@
+import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { SQSHandler } from 'aws-lambda';
 import { ConsumerModule } from '../consumer/consumer.module';
 import { ConsumerService } from '../consumer/consumer.service';
-import { SqsMessage } from '../common/types/sqs.types';
+import { isValidSqsMessage } from '../common/types/sqs.types';
+
+const logger = new Logger('SqsConsumerHandler');
 
 let consumerService: ConsumerService;
 
@@ -17,7 +20,11 @@ export const handler: SQSHandler = async (event) => {
   consumerService ??= await bootstrap();
 
   for (const record of event.Records) {
-    const msg = JSON.parse(record.body) as SqsMessage;
-    await consumerService.processMessage(msg);
+    const parsed: unknown = JSON.parse(record.body);
+    if (!isValidSqsMessage(parsed)) {
+      logger.error(`Invalid SQS message, skipping: ${record.body}`);
+      continue;
+    }
+    await consumerService.processMessage(parsed);
   }
 };

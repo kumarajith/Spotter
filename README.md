@@ -245,11 +245,13 @@ git push origin main
 │           ├── queue.ts                # SQS + DLQ
 │           ├── scheduler.ts            # Scheduler Lambda + EventBridge Schedule
 │           ├── secrets.ts              # SSM parameter reference
-│           └── monitoring.ts           # CloudWatch alarms
+│           ├── monitoring.ts           # CloudWatch alarms
+│           └── notifications.ts       # SNS alarm topic + email
 ├── scripts/
 │   ├── register-commands.ts            # Slash command registration
 │   ├── setup-local.ts                  # LocalStack provisioning
-│   └── run-consumer.ts                 # Local SQS polling
+│   ├── run-consumer.ts                 # Local SQS polling
+│   └── migrate.ts                     # SQLite → DynamoDB migration
 ├── legacy/                             # Original Discord.js bot (reference)
 └── .github/workflows/
     ├── ci.yml
@@ -283,6 +285,42 @@ Activity log    GUILD#<id>        LOG#<date>#<userId>#<act>   USER#<userId>     
 Streak          GUILD#<id>        STREAK#<userId>             LEADERBOARD#<id>    STREAK#<00015>
 Channel         GUILD#<id>        CHANNEL#<channelId>         —                   —
 ```
+
+---
+
+## Migration (SQLite → DynamoDB)
+
+If migrating from the legacy Discord.js bot (v1):
+
+```bash
+# Dry run — validate without writing
+npm run migrate -- --db legacy/spotter.db --dry-run
+
+# Run for real against local DynamoDB
+npm run migrate -- --db legacy/spotter.db --endpoint http://localhost:4566
+
+# Run against AWS (uses default credentials)
+npm run migrate -- --db legacy/spotter.db --table-name spotter-prod
+
+# Migrate a single guild for testing
+npm run migrate -- --db legacy/spotter.db --guild 123456789 --dry-run
+```
+
+**Cutover steps**: dry-run → stop legacy bot → run migration → deploy v2 → register slash commands → verify → keep SQLite backup.
+
+---
+
+## Roadmap
+
+- [x] Core bot functionality (slash commands, activity logging, streaks)
+- [x] Async processing via SQS (deferred responses, DLQ)
+- [x] Daily automation (streak resets, panel reposts via EventBridge Scheduler)
+- [x] CI/CD with GitHub Actions + OIDC
+- [x] Unit tests (80+ tests across app and infrastructure)
+- [x] CloudWatch alarm alerting via SNS email
+- [x] SQLite → DynamoDB migration script
+- [ ] **Observability** — structured JSON logging, correlation IDs across Lambda invocations, CloudWatch Logs Insights or Sentry integration
+- [ ] **Dashboard** — CloudWatch dashboard or Grafana for key metrics (latency, error rates, streak activity)
 
 ---
 

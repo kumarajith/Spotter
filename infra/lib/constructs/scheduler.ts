@@ -1,6 +1,8 @@
+import * as path from 'path';
 import * as cdk from 'aws-cdk-lib';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as logs from 'aws-cdk-lib/aws-logs';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import * as scheduler from 'aws-cdk-lib/aws-scheduler';
 import * as schedulerTargets from 'aws-cdk-lib/aws-scheduler-targets';
@@ -18,12 +20,15 @@ export class SchedulerConstruct extends Construct {
   constructor(scope: Construct, id: string, props: SchedulerConstructProps) {
     super(scope, id);
 
+    const codePath = path.join(__dirname, '../../dist');
+
     this.schedulerLambda = new lambda.Function(this, 'SchedulerHandler', {
       runtime: lambda.Runtime.NODEJS_24_X,
       handler: 'handlers/scheduler.handler',
-      code: lambda.Code.fromAsset('../dist'),
+      code: lambda.Code.fromAsset(codePath),
       memorySize: 512,
       timeout: cdk.Duration.minutes(5),
+      logRetention: logs.RetentionDays.TWO_WEEKS,
       environment: {
         TABLE_NAME: props.table.tableName,
         DISCORD_PARAM_NAME: props.discordParam.parameterName,

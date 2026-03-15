@@ -22,3 +22,22 @@ export interface BackfillActivityMessage {
 
 // Discriminated union — extend with | NewMessageType as new message types are added
 export type SqsMessage = ActivityLoggedMessage | BackfillActivityMessage;
+
+const VALID_TYPES = new Set<SqsMessage['type']>(['ACTIVITY_LOGGED', 'BACKFILL_ACTIVITY']);
+
+/** Type guard that validates shape + discriminator of an SQS message body. */
+export function isValidSqsMessage(value: unknown): value is SqsMessage {
+  if (typeof value !== 'object' || value === null) return false;
+  const obj = value as Record<string, unknown>;
+  if (typeof obj.type !== 'string' || !VALID_TYPES.has(obj.type as SqsMessage['type']))
+    return false;
+  // Validate common required fields
+  return (
+    typeof obj.guildId === 'string' &&
+    typeof obj.userId === 'string' &&
+    typeof obj.activityName === 'string' &&
+    typeof obj.channelId === 'string' &&
+    typeof obj.interactionToken === 'string' &&
+    typeof obj.applicationId === 'string'
+  );
+}

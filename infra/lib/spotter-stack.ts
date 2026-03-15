@@ -6,6 +6,7 @@ import { ApiConstruct } from './constructs/api';
 import { SecretsConstruct } from './constructs/secrets';
 import { SchedulerConstruct } from './constructs/scheduler';
 import { MonitoringConstruct } from './constructs/monitoring';
+import { NotificationsConstruct } from './constructs/notifications';
 
 export interface SpotterStackProps extends cdk.StackProps {
   environment: string;
@@ -40,15 +41,22 @@ export class SpotterStack extends cdk.Stack {
       environment: props.environment,
     });
 
+    const alarmEmail = String(this.node.tryGetContext('alarmEmail') ?? '');
+    const notifications = new NotificationsConstruct(this, 'Notifications', {
+      environment: props.environment,
+      ...(alarmEmail && { alarmEmail }),
+    });
+
     new MonitoringConstruct(this, 'Monitoring', {
       dlq: queue.dlq,
       consumerLambda: api.consumerLambda,
       schedulerLambda: scheduler.schedulerLambda,
+      alarmTopic: notifications.topic,
     });
 
     new cdk.CfnOutput(this, 'ApiEndpoint', {
-      value: api.apiLambda.functionArn,
-      description: 'API Lambda ARN — check API Gateway console for the HTTP endpoint URL',
+      value: api.httpApi.url ?? 'N/A',
+      description: 'HTTP API endpoint URL',
     });
 
     new cdk.CfnOutput(this, 'TableName', {

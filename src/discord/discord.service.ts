@@ -143,6 +143,9 @@ export class DiscordService {
     }
 
     const activityName = interaction.data.custom_id.slice('log_activity:'.length);
+    if (!activityName) {
+      return ephemeral('Invalid activity.');
+    }
 
     const message: ActivityLoggedMessage = {
       type: 'ACTIVITY_LOGGED',
@@ -169,7 +172,10 @@ export class DiscordService {
     interaction: APIChatInputApplicationCommandInteraction,
     guildId: string,
   ) {
-    const selfId = interaction.member?.user.id ?? interaction.user?.id ?? '';
+    const selfId = interaction.member?.user.id ?? interaction.user?.id;
+    if (!selfId) {
+      return ephemeral('Could not identify user.');
+    }
     const targetUserId = getStringOption(interaction.data.options, 'user') ?? selfId;
 
     const today = new Date().toISOString().slice(0, 10);
@@ -319,7 +325,10 @@ export class DiscordService {
       return ephemeral('❌ Invalid date. Use YYYY-MM-DD format and do not use a future date.');
     }
 
-    const channelId = interaction.channel?.id ?? '';
+    const channelId = interaction.channel?.id;
+    if (!channelId) {
+      return ephemeral('Could not determine channel.');
+    }
 
     const message: BackfillActivityMessage = {
       type: 'BACKFILL_ACTIVITY',
@@ -353,7 +362,7 @@ export class DiscordService {
     }
 
     try {
-      const userId = interaction.member?.user.id ?? interaction.user?.id ?? 'unknown';
+      const userId = interaction.member?.user.id ?? interaction.user?.id ?? 'system';
       await this.activityService.addActivity(guildId, name, emoji, userId);
       const display = emoji ? `${emoji} ${name}` : name;
       return ephemeral(
