@@ -46,12 +46,12 @@ export class ConsumerService {
 
     const { currentStreak } = await this.streakService.recomputeStreak(msg.guildId, msg.userId);
 
-    const streakSuffix = currentStreak > 0 ? ` Your streak: 🔥 ${currentStreak}-day streak!` : '';
-    await this.sendFollowup(
-      msg.applicationId,
-      msg.interactionToken,
-      `✅ Backfilled **${label}** for ${msg.date}.${streakSuffix}`,
+    const streakSuffix = currentStreak > 0 ? ` — 🔥 ${currentStreak}-day streak!` : '';
+    await this.sendChannelMessage(
+      msg.channelId,
+      `<@${msg.userId}> backfilled **${label}** for ${msg.date}${streakSuffix}`,
     );
+    await this.deleteOriginalResponse(msg.applicationId, msg.interactionToken);
   }
 
   private async handleActivityLogged(msg: ActivityLoggedMessage): Promise<void> {
@@ -84,11 +84,21 @@ export class ConsumerService {
     );
 
     const streakSuffix = currentStreak > 0 ? ` — **${currentStreak}-day** streak 🔥` : '';
-    // Public message — posted directly to the channel via bot token (not interaction webhook)
+    // Post the public message directly to the channel via bot token
     await this.sendChannelMessage(
       msg.channelId,
       `<@${msg.userId}> logged **${label}**${streakSuffix}`,
     );
+    // Delete the ephemeral deferred response so "Spotter is thinking..." disappears
+    await this.deleteOriginalResponse(msg.applicationId, msg.interactionToken);
+  }
+
+  private async deleteOriginalResponse(applicationId: string, interactionToken: string): Promise<void> {
+    const url = `https://discord.com/api/v10/webhooks/${applicationId}/${interactionToken}/messages/@original`;
+    const response = await fetch(url, { method: 'DELETE' });
+    if (!response.ok) {
+      this.logger.error(`Delete original response failed [${response.status}]: ${response.statusText}`);
+    }
   }
 
   private async sendChannelMessage(channelId: string, content: string): Promise<void> {

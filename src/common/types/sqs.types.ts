@@ -15,6 +15,7 @@ export interface BackfillActivityMessage {
   userId: string;
   activityName: string; // lowercased
   date: string; // YYYY-MM-DD — explicit past date, not derived from timestamp
+  channelId: string;
   interactionToken: string;
   applicationId: string;
 }

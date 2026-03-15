@@ -319,12 +319,15 @@ export class DiscordService {
       return ephemeral('❌ Invalid date. Use YYYY-MM-DD format and do not use a future date.');
     }
 
+    const channelId = interaction.channel?.id ?? '';
+
     const message: BackfillActivityMessage = {
       type: 'BACKFILL_ACTIVITY',
       guildId,
       userId,
       activityName,
       date,
+      channelId,
       interactionToken: interaction.token,
       applicationId: this.discordConfig.applicationId,
     };
