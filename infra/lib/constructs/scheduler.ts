@@ -73,10 +73,9 @@ export class SchedulerConstruct extends Construct {
     props.discordParam.grantRead(this.schedulerLambda);
 
     new scheduler.Schedule(this, 'DailySchedule', {
-      // cron(0 8 * * ? *) — 8:00 AM UTC daily
-      // UTC is the default timezone for EventBridge Scheduler
+      // cron(0 0 * * ? *) — midnight UTC daily
       schedule: scheduler.ScheduleExpression.cron({
-        hour: '8',
+        hour: '0',
         minute: '0',
       }),
       target: new schedulerTargets.LambdaInvoke(this.schedulerLambda, {
