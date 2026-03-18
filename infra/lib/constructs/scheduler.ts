@@ -26,7 +26,7 @@ export class SchedulerConstruct extends Construct {
 
     this.schedulerLambda = new lambda.Function(this, 'SchedulerHandler', {
       runtime: lambda.Runtime.NODEJS_22_X,
-      handler: 'handlers/scheduler.handler',
+      handler: 'handlers/scheduler.handler.handler',
       code: lambda.Code.fromAsset(appRoot, {
         assetHashType: cdk.AssetHashType.OUTPUT,
         bundling: {
