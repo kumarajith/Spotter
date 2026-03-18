@@ -258,7 +258,7 @@ export class DiscordService {
       fields,
     };
 
-    return embedResponse(embed, true);
+    return embedResponse(embed, false);
   }
 
   private async handleLeaderboard(guildId: string) {
