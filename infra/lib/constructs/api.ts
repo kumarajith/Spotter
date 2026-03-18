@@ -25,7 +25,7 @@ export class ApiConstruct extends Construct {
   constructor(scope: Construct, id: string, props: ApiConstructProps) {
     super(scope, id);
 
-    const codePath = path.join(__dirname, '../../dist');
+    const codePath = path.join(__dirname, '../../../dist');
     const consumerTimeout = cdk.Duration.seconds(60);
 
     this.apiLambda = new lambda.Function(this, 'ApiHandler', {

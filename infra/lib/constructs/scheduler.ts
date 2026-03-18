@@ -20,7 +20,7 @@ export class SchedulerConstruct extends Construct {
   constructor(scope: Construct, id: string, props: SchedulerConstructProps) {
     super(scope, id);
 
-    const codePath = path.join(__dirname, '../../dist');
+    const codePath = path.join(__dirname, '../../../dist');
 
     this.schedulerLambda = new lambda.Function(this, 'SchedulerHandler', {
       runtime: lambda.Runtime.NODEJS_24_X,
