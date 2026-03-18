@@ -84,7 +84,7 @@ export class ApiConstruct extends Construct {
 
     this.consumerLambda = new lambda.Function(this, 'SqsConsumer', {
       runtime: lambda.Runtime.NODEJS_22_X,
-      handler: 'handlers/sqs-consumer.handler.handler',
+      handler: 'handlers/sqs-consumer.handler',
       code: lambdaCode,
       memorySize: 256,
       timeout: consumerTimeout,

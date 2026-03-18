@@ -23,7 +23,7 @@ jest.mock('@nestjs/common', () => {
 });
 
 // Import AFTER mocks are in place — singleton will be shared across tests
-import { handler } from './sqs-consumer.handler';
+import { handler } from './sqs-consumer';
 
 function makeSqsEvent(...bodies: unknown[]): SQSEvent {
   return {
