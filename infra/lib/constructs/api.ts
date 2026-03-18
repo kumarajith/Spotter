@@ -33,7 +33,7 @@ export class ApiConstruct extends Construct {
     const lambdaCode = lambda.Code.fromAsset(appRoot, {
       assetHashType: cdk.AssetHashType.OUTPUT,
       bundling: {
-        image: lambda.Runtime.NODEJS_24_X.bundlingImage,
+        image: lambda.Runtime.NODEJS_22_X.bundlingImage,
         local: {
           tryBundle(outputDir: string): boolean {
             try {
@@ -64,7 +64,7 @@ export class ApiConstruct extends Construct {
     });
 
     this.apiLambda = new lambda.Function(this, 'ApiHandler', {
-      runtime: lambda.Runtime.NODEJS_24_X,
+      runtime: lambda.Runtime.NODEJS_22_X,
       handler: 'lambda.handler',
       code: lambdaCode,
       memorySize: 512,
@@ -83,7 +83,7 @@ export class ApiConstruct extends Construct {
     props.discordParam.grantRead(this.apiLambda);
 
     this.consumerLambda = new lambda.Function(this, 'SqsConsumer', {
-      runtime: lambda.Runtime.NODEJS_24_X,
+      runtime: lambda.Runtime.NODEJS_22_X,
       handler: 'handlers/sqs-consumer.handler',
       code: lambdaCode,
       memorySize: 256,

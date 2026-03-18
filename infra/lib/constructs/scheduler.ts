@@ -25,12 +25,12 @@ export class SchedulerConstruct extends Construct {
     const distPath = path.join(appRoot, 'dist');
 
     this.schedulerLambda = new lambda.Function(this, 'SchedulerHandler', {
-      runtime: lambda.Runtime.NODEJS_24_X,
+      runtime: lambda.Runtime.NODEJS_22_X,
       handler: 'handlers/scheduler.handler',
       code: lambda.Code.fromAsset(appRoot, {
         assetHashType: cdk.AssetHashType.OUTPUT,
         bundling: {
-          image: lambda.Runtime.NODEJS_24_X.bundlingImage,
+          image: lambda.Runtime.NODEJS_22_X.bundlingImage,
           local: {
             tryBundle(outputDir: string): boolean {
               try {

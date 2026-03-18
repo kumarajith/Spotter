@@ -16,7 +16,9 @@ async function bootstrap(): Promise<ServerlessHandler> {
     rawBody: true,
   });
   await app.init();
-  return serverlessExpress({ app: expressApp });
+  // @codegenie/serverless-express types only expose the callback overload,
+  // but the library returns a Promise when called without a callback (Node 24+).
+  return serverlessExpress({ app: expressApp }) as unknown as ServerlessHandler;
 }
 
 export const handler = async (
