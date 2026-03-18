@@ -2,7 +2,9 @@ name: Deploy
 
 on:
   push:
-    branches: [main]
+    branches:
+      - development
+      - main
 
 permissions:
   id-token: write
@@ -11,6 +13,7 @@ permissions:
 jobs:
   deploy-dev:
     name: Deploy (dev)
+    if: github.ref == 'refs/heads/development'
     runs-on: ubuntu-latest
 
     steps:
@@ -41,9 +44,8 @@ jobs:
 
   deploy-prod:
     name: Deploy (prod)
-    needs: deploy-dev
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: prod
 
     steps:
       - uses: actions/checkout@v4
