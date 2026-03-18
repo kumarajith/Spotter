@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { DiscordConfigService } from '../common/config/discord-config-service';
 import { TrackingRepository } from '../tracking/tracking.repository';
 import { StreakService } from '../tracking/streak.service';
 import {
@@ -12,6 +13,7 @@ export class ConsumerService {
   private readonly logger = new Logger(ConsumerService.name);
 
   constructor(
+    private readonly discordConfig: DiscordConfigService,
     private readonly trackingRepository: TrackingRepository,
     private readonly streakService: StreakService,
   ) {}
@@ -108,17 +110,12 @@ export class ConsumerService {
   }
 
   private async sendChannelMessage(channelId: string, content: string): Promise<void> {
-    const botToken = process.env.DISCORD_BOT_TOKEN;
-    if (!botToken) {
-      throw new Error('DISCORD_BOT_TOKEN is not set — cannot send channel message');
-    }
-
     const url = `https://discord.com/api/v10/channels/${channelId}/messages`;
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bot ${botToken}`,
+        Authorization: `Bot ${this.discordConfig.botToken}`,
       },
       body: JSON.stringify({ content }),
     });
