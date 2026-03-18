@@ -5,8 +5,9 @@
  *   npx ts-node scripts/migrate.ts --db <path-to-spotter.db> [options]
  *
  * Options:
- *   --db <path>          Path to the legacy SQLite database (required)
+ *   --db <path>          Path to the legacy SQLite database (required unless --reset)
  *   --dry-run            Log what would be written without writing
+ *   --reset              Delete all items from the table (no --db required)
  *   --table-name <name>  DynamoDB table name (default: TABLE_NAME env or 'spotter-dev')
  *   --endpoint <url>     DynamoDB endpoint (default: DYNAMODB_ENDPOINT env)
  *   --guild <id>         Migrate a single guild (for testing)
@@ -14,7 +15,7 @@
 
 import Database from 'better-sqlite3';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { BatchWriteCommand, DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
+import { BatchWriteCommand, DynamoDBDocumentClient, ScanCommand } from '@aws-sdk/lib-dynamodb';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -47,6 +48,7 @@ function parseArgs(argv: string[]) {
   const args = argv.slice(2);
   let dbPath = '';
   let dryRun = false;
+  let reset = false;
   let tableName = process.env.TABLE_NAME ?? 'spotter-dev';
   let endpoint = process.env.DYNAMODB_ENDPOINT;
   let guild: string | undefined;
@@ -58,6 +60,9 @@ function parseArgs(argv: string[]) {
         break;
       case '--dry-run':
         dryRun = true;
+        break;
+      case '--reset':
+        reset = true;
         break;
       case '--table-name':
         tableName = args[++i];
@@ -74,12 +79,12 @@ function parseArgs(argv: string[]) {
     }
   }
 
-  if (!dbPath) {
-    console.error('Missing required --db <path>');
+  if (!reset && !dbPath) {
+    console.error('Missing required --db <path> (or use --reset to clear the table)');
     process.exit(1);
   }
 
-  return { dbPath, dryRun, tableName, endpoint, guild };
+  return { dbPath, dryRun, reset, tableName, endpoint, guild };
 }
 
 // ── Streak computation (ported from legacy/src/utils/streakCalc.js) ──────────
@@ -265,21 +270,67 @@ async function batchWrite(
   return written;
 }
 
+// ── Reset (delete all items) ─────────────────────────────────────────────────
+
+async function resetTable(
+  docClient: DynamoDBDocumentClient,
+  tableName: string,
+  dryRun: boolean,
+): Promise<void> {
+  console.log(`=== Resetting table: ${tableName} ===`);
+  let totalDeleted = 0;
+  let lastKey: Record<string, unknown> | undefined;
+
+  do {
+    const result = await docClient.send(
+      new ScanCommand({
+        TableName: tableName,
+        ProjectionExpression: 'PK, SK',
+        ...(lastKey && { ExclusiveStartKey: lastKey }),
+      }),
+    );
+
+    const items = result.Items ?? [];
+    lastKey = result.LastEvaluatedKey as Record<string, unknown> | undefined;
+
+    if (items.length === 0) continue;
+
+    if (dryRun) {
+      console.log(`  [DRY RUN] Would delete ${items.length} items`);
+      totalDeleted += items.length;
+      continue;
+    }
+
+    for (let i = 0; i < items.length; i += 25) {
+      const chunk = items.slice(i, i + 25);
+      await docClient.send(
+        new BatchWriteCommand({
+          RequestItems: {
+            [tableName]: chunk.map((item) => ({
+              DeleteRequest: { Key: { PK: item['PK'] as string, SK: item['SK'] as string } },
+            })),
+          },
+        }),
+      );
+      totalDeleted += chunk.length;
+    }
+  } while (lastKey);
+
+  console.log(`  Deleted ${totalDeleted} items${dryRun ? ' (DRY RUN)' : ''}`);
+}
+
 // ── Main migration ───────────────────────────────────────────────────────────
 
 async function migrate() {
-  const { dbPath, dryRun, tableName, endpoint, guild } = parseArgs(process.argv);
+  const { dbPath, dryRun, reset, tableName, endpoint, guild } = parseArgs(process.argv);
 
-  console.log('=== Spotter Migration: SQLite → DynamoDB ===');
-  console.log(`  DB:         ${dbPath}`);
+  console.log(
+    reset ? '=== Spotter Reset: DynamoDB ===' : '=== Spotter Migration: SQLite → DynamoDB ===',
+  );
   console.log(`  Table:      ${tableName}`);
   console.log(`  Endpoint:   ${endpoint ?? '(default AWS)'}`);
-  console.log(`  Guild:      ${guild ?? '(all)'}`);
   console.log(`  Dry run:    ${dryRun}`);
   console.log('');
-
-  // Open SQLite
-  const db = new Database(dbPath, { readonly: true });
 
   // Setup DynamoDB client
   const dynamoClient = new DynamoDBClient({
@@ -287,6 +338,17 @@ async function migrate() {
     region: process.env.AWS_REGION ?? 'ap-south-1',
   });
   const docClient = DynamoDBDocumentClient.from(dynamoClient);
+
+  if (reset) {
+    await resetTable(docClient, tableName, dryRun);
+    return;
+  }
+
+  console.log(`  DB:         ${dbPath}`);
+  console.log(`  Guild:      ${guild ?? '(all)'}`);
+  console.log('');
+
+  const db = new Database(dbPath, { readonly: true });
 
   const guildFilter = guild ? `WHERE guild_id = ?` : '';
   const guildFilterAliased = guild ? `WHERE al.guild_id = ?` : '';
