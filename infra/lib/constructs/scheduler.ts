@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { execSync } from 'child_process';
 import * as cdk from 'aws-cdk-lib';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
@@ -20,12 +21,44 @@ export class SchedulerConstruct extends Construct {
   constructor(scope: Construct, id: string, props: SchedulerConstructProps) {
     super(scope, id);
 
-    const codePath = path.join(__dirname, '../../../dist');
+    const appRoot = path.join(__dirname, '../../..');
+    const distPath = path.join(appRoot, 'dist');
 
     this.schedulerLambda = new lambda.Function(this, 'SchedulerHandler', {
       runtime: lambda.Runtime.NODEJS_24_X,
       handler: 'handlers/scheduler.handler',
-      code: lambda.Code.fromAsset(codePath),
+      code: lambda.Code.fromAsset(appRoot, {
+        assetHashType: cdk.AssetHashType.OUTPUT,
+        bundling: {
+          image: lambda.Runtime.NODEJS_24_X.bundlingImage,
+          local: {
+            tryBundle(outputDir: string): boolean {
+              try {
+                execSync(
+                  `cp -r "${distPath}/." "${outputDir}/" && ` +
+                    `cp "${appRoot}/package.json" "${outputDir}/" && ` +
+                    `cp "${appRoot}/package-lock.json" "${outputDir}/" && ` +
+                    `npm ci --omit=dev --prefix "${outputDir}"`,
+                  { stdio: 'inherit' },
+                );
+                return true;
+              } catch {
+                return false;
+              }
+            },
+          },
+          command: [
+            'bash',
+            '-c',
+            [
+              'cp -r /asset-input/dist/. /asset-output/',
+              'cp /asset-input/package.json /asset-output/',
+              'cp /asset-input/package-lock.json /asset-output/',
+              'npm ci --omit=dev --prefix /asset-output',
+            ].join(' && '),
+          ],
+        },
+      }),
       memorySize: 512,
       timeout: cdk.Duration.minutes(5),
       logRetention: logs.RetentionDays.TWO_WEEKS,

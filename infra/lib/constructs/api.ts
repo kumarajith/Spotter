@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { execSync } from 'child_process';
 import * as cdk from 'aws-cdk-lib';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
@@ -25,13 +26,47 @@ export class ApiConstruct extends Construct {
   constructor(scope: Construct, id: string, props: ApiConstructProps) {
     super(scope, id);
 
-    const codePath = path.join(__dirname, '../../../dist');
+    const appRoot = path.join(__dirname, '../../..');
+    const distPath = path.join(appRoot, 'dist');
     const consumerTimeout = cdk.Duration.seconds(60);
+
+    const lambdaCode = lambda.Code.fromAsset(appRoot, {
+      assetHashType: cdk.AssetHashType.OUTPUT,
+      bundling: {
+        image: lambda.Runtime.NODEJS_24_X.bundlingImage,
+        local: {
+          tryBundle(outputDir: string): boolean {
+            try {
+              execSync(
+                `cp -r "${distPath}/." "${outputDir}/" && ` +
+                  `cp "${appRoot}/package.json" "${outputDir}/" && ` +
+                  `cp "${appRoot}/package-lock.json" "${outputDir}/" && ` +
+                  `npm ci --omit=dev --prefix "${outputDir}"`,
+                { stdio: 'inherit' },
+              );
+              return true;
+            } catch {
+              return false;
+            }
+          },
+        },
+        command: [
+          'bash',
+          '-c',
+          [
+            'cp -r /asset-input/dist/. /asset-output/',
+            'cp /asset-input/package.json /asset-output/',
+            'cp /asset-input/package-lock.json /asset-output/',
+            'npm ci --omit=dev --prefix /asset-output',
+          ].join(' && '),
+        ],
+      },
+    });
 
     this.apiLambda = new lambda.Function(this, 'ApiHandler', {
       runtime: lambda.Runtime.NODEJS_24_X,
       handler: 'lambda.handler',
-      code: lambda.Code.fromAsset(codePath),
+      code: lambdaCode,
       memorySize: 512,
       timeout: cdk.Duration.seconds(30),
       logRetention: logs.RetentionDays.TWO_WEEKS,
@@ -50,7 +85,7 @@ export class ApiConstruct extends Construct {
     this.consumerLambda = new lambda.Function(this, 'SqsConsumer', {
       runtime: lambda.Runtime.NODEJS_24_X,
       handler: 'handlers/sqs-consumer.handler',
-      code: lambda.Code.fromAsset(codePath),
+      code: lambdaCode,
       memorySize: 256,
       timeout: consumerTimeout,
       logRetention: logs.RetentionDays.TWO_WEEKS,
