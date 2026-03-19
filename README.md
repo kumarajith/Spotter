@@ -25,60 +25,7 @@ Members log workouts by clicking buttons on a daily panel. Spotter tracks consec
 ---
 
 ## Architecture
-
-```mermaid
-flowchart LR
-    subgraph Discord
-        U([fa:fa-user User])
-    end
-
-    subgraph AWS["AWS · ap-south-1"]
-        direction TB
-
-        subgraph Request["Request Path"]
-            APIGW[/"API Gateway<br/>HTTP API"/]
-            API["API Lambda<br/><small>NestJS · 512 MB · 30s</small>"]
-        end
-
-        subgraph Async["Async Processing"]
-            SQS[["SQS Queue"]]
-            DLQ[["Dead Letter Queue"]]
-            CON["Consumer Lambda<br/><small>NestJS · 256 MB · 60s</small>"]
-        end
-
-        subgraph Scheduled["Daily Automation"]
-            EB{{EventBridge Scheduler<br/><small>cron 0 8 * * ? *</small>}}
-            SCH["Scheduler Lambda<br/><small>512 MB · 5 min</small>"]
-        end
-
-        subgraph Storage["Storage & Config"]
-            DB[(DynamoDB<br/><small>single table · on-demand</small>)]
-            SSM["SSM SecureString<br/><small>/spotter/{env}/discord</small>"]
-        end
-
-        subgraph Ops["Observability"]
-            CW["CloudWatch Alarms"]
-            SNS["SNS Topic"]
-        end
-    end
-
-    U -->|"POST /interactions"| APIGW
-    APIGW --> API
-    API -.->|"type 5 deferred<br/>< 3 s"| U
-    API -->|"send message"| SQS
-    SQS -->|"batch = 1"| CON
-    SQS -->|"3 failures"| DLQ
-    CON -->|"write log · update streak"| DB
-    CON -.->|"followup message"| U
-
-    EB -->|"8 AM UTC"| SCH
-    SCH -->|"reset streaks · query channels"| DB
-    SCH -.->|"summary + panel"| U
-
-    API & CON & SCH -->|"read creds"| SSM
-    DLQ & CON & SCH -.-> CW
-    CW --> SNS
-```
+![Architecture](spotter-architecture.svg)
 
 ### Key design decisions
 
