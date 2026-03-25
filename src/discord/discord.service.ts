@@ -7,7 +7,6 @@ import {
   APIMessageComponentInteraction,
   ComponentType,
   InteractionResponseType,
-  MessageFlags,
 } from 'discord-api-types/v10';
 import { ActivityService } from '../activity/activity.service';
 import { PanelService } from '../panel/panel.service';

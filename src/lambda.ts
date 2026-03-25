@@ -1,6 +1,6 @@
 import { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import { verifyKey } from 'discord-interactions';
-import { InteractionType, InteractionResponseType } from 'discord-api-types/v10';
+import { APIInteraction, InteractionType, InteractionResponseType } from 'discord-api-types/v10';
 import { DiscordConfigService } from './common/config/discord-config-service';
 import { DynamoService } from './common/dynamodb/dynamodb.service';
 import { ActivityRepository } from './activity/activity.repository';
@@ -57,7 +57,7 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
     return { statusCode: 401, body: 'Invalid request signature' };
   }
 
-  const interaction = JSON.parse(rawBody);
+  const interaction: APIInteraction = JSON.parse(rawBody) as APIInteraction;
 
   // PING — respond immediately without initializing services
   if (interaction.type === InteractionType.Ping) {
