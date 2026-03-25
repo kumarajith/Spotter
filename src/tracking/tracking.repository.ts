@@ -1,8 +1,6 @@
-import { Injectable } from '@nestjs/common';
 import { DynamoService } from '../common/dynamodb/dynamodb.service';
 import { ActivityLogItem } from '../common/types/dynamo.types';
 
-@Injectable()
 export class TrackingRepository {
   constructor(private readonly dynamo: DynamoService) {}
 

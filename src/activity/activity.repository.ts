@@ -1,9 +1,7 @@
-import { Injectable } from '@nestjs/common';
 import { DynamoService } from '../common/dynamodb/dynamodb.service';
 import { ActivityItem } from '../common/types/dynamo.types';
 import { DEFAULT_ACTIVITIES } from './activity.defaults';
 
-@Injectable()
 export class ActivityRepository {
   constructor(private readonly dynamo: DynamoService) {}
   async getActivities(guildId: string): Promise<ActivityItem[]> {

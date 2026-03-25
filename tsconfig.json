@@ -7,8 +7,6 @@
     "isolatedModules": true,
     "declaration": true,
     "removeComments": true,
-    "emitDecoratorMetadata": true,
-    "experimentalDecorators": true,
     "allowSyntheticDefaultImports": true,
     "target": "ES2023",
     "sourceMap": true,
@@ -22,5 +20,5 @@
     "strictBindCallApply": true,
     "noFallthroughCasesInSwitch": true
   },
-  "exclude": ["node_modules", "infra", "dist", "legacy"]
+  "exclude": ["node_modules", "infra", "dist", "legacy", "scripts/migrate.ts"]
 }

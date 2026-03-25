@@ -1,4 +1,3 @@
-import { Injectable } from '@nestjs/common';
 import {
   APIApplicationCommandAutocompleteInteraction,
   APIApplicationCommandInteraction,
@@ -13,23 +12,21 @@ import {
 import { ActivityService } from '../activity/activity.service';
 import { PanelService } from '../panel/panel.service';
 import { DiscordConfigService } from '../common/config/discord-config-service';
-import { SqsService } from '../sqs/sqs.service';
+import { StreakService } from '../tracking/streak.service';
 import { StreakRepository } from '../tracking/streak.repository';
 import { TrackingRepository } from '../tracking/tracking.repository';
-import { ActivityLoggedMessage, BackfillActivityMessage } from '../common/types/sqs.types';
 import { COMMANDS } from './commands';
 import { autocompleteResult, embedResponse, ephemeral, getStringOption } from './discord.utils';
 
 const EMBED_COLOR = 0x57f287; // Discord green
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-@Injectable()
 export class DiscordService {
   constructor(
     private readonly activityService: ActivityService,
     private readonly panelService: PanelService,
     private readonly discordConfig: DiscordConfigService,
-    private readonly sqsService: SqsService,
+    private readonly streakService: StreakService,
     private readonly streakRepository: StreakRepository,
     private readonly trackingRepository: TrackingRepository,
   ) {}
@@ -137,34 +134,37 @@ export class DiscordService {
       return ephemeral('Could not identify user.');
     }
 
-    const channelId = interaction.channel?.id;
-    if (!channelId) {
-      return ephemeral('Could not determine channel.');
-    }
-
     const activityName = interaction.data.custom_id.slice('log_activity:'.length);
     if (!activityName) {
       return ephemeral('Invalid activity.');
     }
 
-    const message: ActivityLoggedMessage = {
-      type: 'ACTIVITY_LOGGED',
+    const date = new Date().toISOString().slice(0, 10);
+    const { alreadyLogged } = await this.trackingRepository.logActivity(
       guildId,
       userId,
       activityName,
-      timestamp: new Date().toISOString(),
-      channelId,
-      interactionToken: interaction.token,
-      applicationId: this.discordConfig.applicationId,
-    };
+      date,
+    );
 
-    await this.sqsService.send(message);
+    const label = activityName.charAt(0).toUpperCase() + activityName.slice(1);
 
-    // Ephemeral defer: "Bot is thinking..." only visible to the clicker.
-    // Consumer posts the public log directly to the channel via bot token.
+    if (alreadyLogged) {
+      return ephemeral(`Already logged **${label}** today!`);
+    }
+
+    const { currentStreak } = await this.streakService.processActivityLogged(
+      guildId,
+      userId,
+      activityName,
+      date,
+    );
+
     return {
-      type: InteractionResponseType.DeferredChannelMessageWithSource,
-      data: { flags: MessageFlags.Ephemeral },
+      type: InteractionResponseType.ChannelMessageWithSource,
+      data: {
+        content: `<@${userId}> logged **${label}** — **${currentStreak}-day** streak 🔥`,
+      },
     };
   }
 
@@ -325,27 +325,26 @@ export class DiscordService {
       return ephemeral('❌ Invalid date. Use YYYY-MM-DD format and do not use a future date.');
     }
 
-    const channelId = interaction.channel?.id;
-    if (!channelId) {
-      return ephemeral('Could not determine channel.');
-    }
-
-    const message: BackfillActivityMessage = {
-      type: 'BACKFILL_ACTIVITY',
+    const { alreadyLogged } = await this.trackingRepository.logActivity(
       guildId,
       userId,
       activityName,
       date,
-      channelId,
-      interactionToken: interaction.token,
-      applicationId: this.discordConfig.applicationId,
-    };
+    );
 
-    await this.sqsService.send(message);
+    const label = activityName.charAt(0).toUpperCase() + activityName.slice(1);
+
+    if (alreadyLogged) {
+      return ephemeral(`Already logged **${label}** on ${date}.`);
+    }
+
+    const { currentStreak } = await this.streakService.recomputeStreak(guildId, userId);
 
     return {
-      type: InteractionResponseType.DeferredChannelMessageWithSource,
-      data: { flags: MessageFlags.Ephemeral },
+      type: InteractionResponseType.ChannelMessageWithSource,
+      data: {
+        content: `<@${userId}> backfilled **${label}** for ${date} — **${currentStreak}-day** streak 🔥`,
+      },
     };
   }
 

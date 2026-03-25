@@ -1,8 +1,6 @@
-import { Injectable } from '@nestjs/common';
 import { DynamoService } from '../common/dynamodb/dynamodb.service';
 import { TrackedChannelItem } from '../common/types/dynamo.types';
 
-@Injectable()
 export class PanelRepository {
   constructor(private readonly dynamo: DynamoService) {}
 

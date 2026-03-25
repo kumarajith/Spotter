@@ -1,4 +1,3 @@
-import { Injectable } from '@nestjs/common';
 import { PendingBreakState, StreakItem } from '../common/types/dynamo.types';
 import { StreakRepository } from './streak.repository';
 
@@ -15,7 +14,6 @@ function padStreak(n: number): string {
   return n.toString().padStart(5, '0');
 }
 
-@Injectable()
 export class StreakService {
   constructor(private readonly streakRepository: StreakRepository) {}
 

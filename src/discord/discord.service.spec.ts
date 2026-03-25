@@ -1,4 +1,3 @@
-import { Test, TestingModule } from '@nestjs/testing';
 import {
   InteractionResponseType,
   InteractionType,
@@ -11,7 +10,7 @@ import { DiscordService } from './discord.service';
 import { ActivityService } from '../activity/activity.service';
 import { PanelService } from '../panel/panel.service';
 import { DiscordConfigService } from '../common/config/discord-config-service';
-import { SqsService } from '../sqs/sqs.service';
+import { StreakService } from '../tracking/streak.service';
 import { StreakRepository } from '../tracking/streak.repository';
 import { TrackingRepository } from '../tracking/tracking.repository';
 import { COMMANDS } from './commands';
@@ -68,64 +67,56 @@ interface EphemeralData {
 
 describe('DiscordService', () => {
   let service: DiscordService;
-  let activityService: jest.Mocked<ActivityService>;
-  let panelService: jest.Mocked<PanelService>;
-  let sqsService: jest.Mocked<SqsService>;
-  let streakRepository: jest.Mocked<StreakRepository>;
+  let activityService: jest.Mocked<
+    Pick<ActivityService, 'getActivities' | 'addActivity' | 'removeActivity'>
+  >;
+  let panelService: jest.Mocked<Pick<PanelService, 'setup'>>;
+  let streakService: jest.Mocked<Pick<StreakService, 'processActivityLogged' | 'recomputeStreak'>>;
+  let streakRepository: jest.Mocked<
+    Pick<StreakRepository, 'getStreak' | 'getTopCurrentStreaks' | 'getAllGuildStreaks'>
+  >;
+  let trackingRepository: jest.Mocked<
+    Pick<TrackingRepository, 'logActivity' | 'getUserLogsForRange' | 'getUserActivityCounts'>
+  >;
 
-  beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        DiscordService,
-        {
-          provide: ActivityService,
-          useValue: {
-            getActivities: jest.fn().mockResolvedValue([]),
-            addActivity: jest.fn().mockResolvedValue(undefined),
-            removeActivity: jest.fn().mockResolvedValue(undefined),
-          },
-        },
-        {
-          provide: PanelService,
-          useValue: {
-            setup: jest.fn().mockResolvedValue(undefined),
-          },
-        },
-        {
-          provide: DiscordConfigService,
-          useValue: {
-            applicationId: 'app-123',
-          },
-        },
-        {
-          provide: SqsService,
-          useValue: {
-            send: jest.fn().mockResolvedValue(undefined),
-          },
-        },
-        {
-          provide: StreakRepository,
-          useValue: {
-            getStreak: jest.fn().mockResolvedValue(null),
-            getTopCurrentStreaks: jest.fn().mockResolvedValue([]),
-            getAllGuildStreaks: jest.fn().mockResolvedValue([]),
-          },
-        },
-        {
-          provide: TrackingRepository,
-          useValue: {
-            getUserLogsForRange: jest.fn().mockResolvedValue([]),
-            getUserActivityCounts: jest.fn().mockResolvedValue(new Map()),
-          },
-        },
-      ],
-    }).compile();
+  beforeEach(() => {
+    activityService = {
+      getActivities: jest.fn().mockResolvedValue([]),
+      addActivity: jest.fn().mockResolvedValue(undefined),
+      removeActivity: jest.fn().mockResolvedValue(undefined),
+    };
 
-    service = module.get(DiscordService);
-    activityService = module.get(ActivityService);
-    panelService = module.get(PanelService);
-    sqsService = module.get(SqsService);
-    streakRepository = module.get(StreakRepository);
+    panelService = {
+      setup: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const discordConfig = { applicationId: 'app-123' } as DiscordConfigService;
+
+    streakService = {
+      processActivityLogged: jest.fn().mockResolvedValue({ currentStreak: 1 }),
+      recomputeStreak: jest.fn().mockResolvedValue({ currentStreak: 1, longestStreak: 1 }),
+    };
+
+    streakRepository = {
+      getStreak: jest.fn().mockResolvedValue(null),
+      getTopCurrentStreaks: jest.fn().mockResolvedValue([]),
+      getAllGuildStreaks: jest.fn().mockResolvedValue([]),
+    };
+
+    trackingRepository = {
+      logActivity: jest.fn().mockResolvedValue({ alreadyLogged: false }),
+      getUserLogsForRange: jest.fn().mockResolvedValue([]),
+      getUserActivityCounts: jest.fn().mockResolvedValue(new Map()),
+    };
+
+    service = new DiscordService(
+      activityService as unknown as ActivityService,
+      panelService as unknown as PanelService,
+      discordConfig,
+      streakService as unknown as StreakService,
+      streakRepository as unknown as StreakRepository,
+      trackingRepository as unknown as TrackingRepository,
+    );
   });
 
   // -----------------------------------------------------------------------
@@ -164,12 +155,17 @@ describe('DiscordService', () => {
     it('calls activityService.addActivity and returns success', async () => {
       const interaction = makeCommandInteraction(COMMANDS.ADD_ACTIVITY, [
         stringOption('name', 'Push'),
-        stringOption('emoji', '💪'),
+        stringOption('emoji', '\u{1F4AA}'),
       ]);
 
       const result = await service.handleCommand(interaction as any);
 
-      expect(activityService.addActivity).toHaveBeenCalledWith('guild-1', 'Push', '💪', 'user-1');
+      expect(activityService.addActivity).toHaveBeenCalledWith(
+        'guild-1',
+        'Push',
+        '\u{1F4AA}',
+        'user-1',
+      );
       expect(result.type).toBe(InteractionResponseType.ChannelMessageWithSource);
       expect((result.data as EphemeralData).content).toContain('Added activity');
       expect((result.data as EphemeralData).flags).toBe(MessageFlags.Ephemeral);
@@ -244,26 +240,40 @@ describe('DiscordService', () => {
   // -----------------------------------------------------------------------
 
   describe('handleLogActivity', () => {
-    it('sends SQS message and returns deferred ephemeral for valid button click', async () => {
+    it('logs activity, processes streak, and returns public message', async () => {
       const interaction = makeComponentInteraction('log_activity:push');
 
       const result = await service.handleComponent(interaction as any);
 
-      expect(sqsService.send).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: 'ACTIVITY_LOGGED',
-          guildId: 'guild-1',
-          userId: 'user-1',
-          activityName: 'push',
-          channelId: 'channel-1',
-          interactionToken: 'interaction-token',
-          applicationId: 'app-123',
-        }),
+      expect(trackingRepository.logActivity).toHaveBeenCalledWith(
+        'guild-1',
+        'user-1',
+        'push',
+        expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      );
+      expect(streakService.processActivityLogged).toHaveBeenCalledWith(
+        'guild-1',
+        'user-1',
+        'push',
+        expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
       );
       expect(result).toEqual({
-        type: InteractionResponseType.DeferredChannelMessageWithSource,
-        data: { flags: MessageFlags.Ephemeral },
+        type: InteractionResponseType.ChannelMessageWithSource,
+        data: { content: expect.stringContaining('logged **Push**') },
       });
+    });
+
+    it('returns ephemeral already-logged message when duplicate', async () => {
+      trackingRepository.logActivity.mockResolvedValueOnce({ alreadyLogged: true });
+
+      const interaction = makeComponentInteraction('log_activity:push');
+
+      const result = await service.handleComponent(interaction as any);
+
+      expect(streakService.processActivityLogged).not.toHaveBeenCalled();
+      expect(result.type).toBe(InteractionResponseType.ChannelMessageWithSource);
+      expect((result.data as EphemeralData).content).toContain('Already logged');
+      expect((result.data as EphemeralData).flags).toBe(MessageFlags.Ephemeral);
     });
 
     it('returns ephemeral error when guild_id is missing', async () => {
@@ -273,7 +283,7 @@ describe('DiscordService', () => {
 
       const result = await service.handleComponent(interaction as any);
 
-      expect(sqsService.send).not.toHaveBeenCalled();
+      expect(trackingRepository.logActivity).not.toHaveBeenCalled();
       expect(result.type).toBe(InteractionResponseType.ChannelMessageWithSource);
       expect(result.data).toHaveProperty('flags', MessageFlags.Ephemeral);
     });
@@ -283,7 +293,7 @@ describe('DiscordService', () => {
 
       const result = await service.handleComponent(interaction as any);
 
-      expect(sqsService.send).not.toHaveBeenCalled();
+      expect(trackingRepository.logActivity).not.toHaveBeenCalled();
       expect(result.type).toBe(InteractionResponseType.ChannelMessageWithSource);
       expect((result.data as EphemeralData).content).toContain('Invalid activity');
     });
@@ -302,7 +312,7 @@ describe('DiscordService', () => {
 
       const result = await service.handleCommand(interaction as any);
 
-      expect(sqsService.send).not.toHaveBeenCalled();
+      expect(trackingRepository.logActivity).not.toHaveBeenCalled();
       expect(result.type).toBe(InteractionResponseType.ChannelMessageWithSource);
       expect((result.data as EphemeralData).content).toContain('Invalid date');
       expect((result.data as EphemeralData).flags).toBe(MessageFlags.Ephemeral);
@@ -316,13 +326,13 @@ describe('DiscordService', () => {
 
       const result = await service.handleCommand(interaction as any);
 
-      expect(sqsService.send).not.toHaveBeenCalled();
+      expect(trackingRepository.logActivity).not.toHaveBeenCalled();
       expect(result.type).toBe(InteractionResponseType.ChannelMessageWithSource);
       expect((result.data as EphemeralData).content).toContain('Invalid date');
       expect((result.data as EphemeralData).flags).toBe(MessageFlags.Ephemeral);
     });
 
-    it('sends SQS message and returns deferred ephemeral for valid backfill', async () => {
+    it('logs activity, recomputes streak, and returns public message', async () => {
       const interaction = makeCommandInteraction(COMMANDS.BACKFILL, [
         stringOption('date', '2025-01-15'),
         stringOption('activity', 'Push'),
@@ -330,20 +340,33 @@ describe('DiscordService', () => {
 
       const result = await service.handleCommand(interaction as any);
 
-      expect(sqsService.send).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: 'BACKFILL_ACTIVITY',
-          guildId: 'guild-1',
-          userId: 'user-1',
-          activityName: 'push',
-          date: '2025-01-15',
-          applicationId: 'app-123',
-        }),
+      expect(trackingRepository.logActivity).toHaveBeenCalledWith(
+        'guild-1',
+        'user-1',
+        'push',
+        '2025-01-15',
       );
+      expect(streakService.recomputeStreak).toHaveBeenCalledWith('guild-1', 'user-1');
       expect(result).toEqual({
-        type: InteractionResponseType.DeferredChannelMessageWithSource,
-        data: { flags: MessageFlags.Ephemeral },
+        type: InteractionResponseType.ChannelMessageWithSource,
+        data: { content: expect.stringContaining('backfilled **Push**') },
       });
+    });
+
+    it('returns ephemeral already-logged message when duplicate backfill', async () => {
+      trackingRepository.logActivity.mockResolvedValueOnce({ alreadyLogged: true });
+
+      const interaction = makeCommandInteraction(COMMANDS.BACKFILL, [
+        stringOption('date', '2025-01-15'),
+        stringOption('activity', 'Push'),
+      ]);
+
+      const result = await service.handleCommand(interaction as any);
+
+      expect(streakService.recomputeStreak).not.toHaveBeenCalled();
+      expect(result.type).toBe(InteractionResponseType.ChannelMessageWithSource);
+      expect((result.data as EphemeralData).content).toContain('Already logged');
+      expect((result.data as EphemeralData).flags).toBe(MessageFlags.Ephemeral);
     });
   });
 
