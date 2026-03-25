@@ -14,9 +14,24 @@ export class SpotterStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: SpotterStackProps) {
     super(scope, id, props);
 
-    const discordBotToken = process.env.DISCORD_BOT_TOKEN ?? '';
-    const discordPublicKey = process.env.DISCORD_PUBLIC_KEY ?? '';
-    const discordApplicationId = process.env.DISCORD_APPLICATION_ID ?? '';
+    // Resolve Discord credentials from SSM SecureString at deploy time.
+    // Values are injected into Lambda env vars via CloudFormation dynamic
+    // references — they never appear in the CloudFormation template.
+    //
+    // Create these params once per environment:
+    //   aws ssm put-parameter --name "/spotter/<env>/discord-bot-token" --type SecureString --value "..."
+    //   aws ssm put-parameter --name "/spotter/<env>/discord-public-key" --type SecureString --value "..."
+    //   aws ssm put-parameter --name "/spotter/<env>/discord-application-id" --type SecureString --value "..."
+    const paramPrefix = `/spotter/${props.environment}`;
+    const discordBotToken = cdk.SecretValue.ssmSecure(
+      `${paramPrefix}/discord-bot-token`,
+    ).unsafeUnwrap();
+    const discordPublicKey = cdk.SecretValue.ssmSecure(
+      `${paramPrefix}/discord-public-key`,
+    ).unsafeUnwrap();
+    const discordApplicationId = cdk.SecretValue.ssmSecure(
+      `${paramPrefix}/discord-application-id`,
+    ).unsafeUnwrap();
 
     const db = new DatabaseConstruct(this, 'Database', {
       environment: props.environment,
