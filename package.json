@@ -12,6 +12,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
+    "local": "docker compose up -d --wait && tsx scripts/setup-local.ts && tsx --watch scripts/dev-server.ts",
     "dev": "tsx --watch scripts/dev-server.ts",
     "commands:register": "tsx scripts/register-commands.ts",
     "infra:synth:dev": "cd infra && npx cdk synth -c env=dev",
@@ -27,7 +28,8 @@
     "@discordjs/builders": "^1.13.1",
     "@discordjs/rest": "^2.6.0",
     "discord-api-types": "^0.38.42",
-    "discord-interactions": "^4.4.0"
+    "discord-interactions": "^4.4.0",
+    "dotenv": "^17.3.1"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
