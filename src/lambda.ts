@@ -71,21 +71,29 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
   const service = init();
   let response: unknown;
 
-  switch (interaction.type) {
-    case InteractionType.ApplicationCommand:
-      response = await service.handleCommand(interaction);
-      break;
-    case InteractionType.MessageComponent:
-      response = await service.handleComponent(interaction);
-      break;
-    case InteractionType.ApplicationCommandAutocomplete:
-      response = await service.handleAutocomplete(interaction);
-      break;
-    default:
-      response = {
-        type: InteractionResponseType.ChannelMessageWithSource,
-        data: { content: 'Unknown interaction type.' },
-      };
+  try {
+    switch (interaction.type) {
+      case InteractionType.ApplicationCommand:
+        response = await service.handleCommand(interaction);
+        break;
+      case InteractionType.MessageComponent:
+        response = await service.handleComponent(interaction);
+        break;
+      case InteractionType.ApplicationCommandAutocomplete:
+        response = await service.handleAutocomplete(interaction);
+        break;
+      default:
+        response = {
+          type: InteractionResponseType.ChannelMessageWithSource,
+          data: { content: 'Unknown interaction type.' },
+        };
+    }
+  } catch (err) {
+    console.error('Unhandled interaction error', err);
+    response = {
+      type: InteractionResponseType.ChannelMessageWithSource,
+      data: { content: 'Something went wrong. Please try again.', flags: 64 },
+    };
   }
 
   return {

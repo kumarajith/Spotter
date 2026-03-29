@@ -14,6 +14,7 @@ import { DiscordConfigService } from '../common/config/discord-config-service';
 import { StreakService } from '../tracking/streak.service';
 import { StreakRepository } from '../tracking/streak.repository';
 import { TrackingRepository } from '../tracking/tracking.repository';
+import { withRetry } from '../common/retry';
 import { COMMANDS } from './commands';
 import { autocompleteResult, embedResponse, ephemeral, getStringOption } from './discord.utils';
 
@@ -139,11 +140,8 @@ export class DiscordService {
     }
 
     const date = new Date().toISOString().slice(0, 10);
-    const { alreadyLogged } = await this.trackingRepository.logActivity(
-      guildId,
-      userId,
-      activityName,
-      date,
+    const { alreadyLogged } = await withRetry(() =>
+      this.trackingRepository.logActivity(guildId, userId, activityName, date),
     );
 
     const label = activityName.charAt(0).toUpperCase() + activityName.slice(1);
@@ -152,11 +150,8 @@ export class DiscordService {
       return ephemeral(`Already logged **${label}** today!`);
     }
 
-    const { currentStreak } = await this.streakService.processActivityLogged(
-      guildId,
-      userId,
-      activityName,
-      date,
+    const { currentStreak } = await withRetry(() =>
+      this.streakService.processActivityLogged(guildId, userId, activityName, date),
     );
 
     return {
@@ -324,11 +319,8 @@ export class DiscordService {
       return ephemeral('❌ Invalid date. Use YYYY-MM-DD format and do not use a future date.');
     }
 
-    const { alreadyLogged } = await this.trackingRepository.logActivity(
-      guildId,
-      userId,
-      activityName,
-      date,
+    const { alreadyLogged } = await withRetry(() =>
+      this.trackingRepository.logActivity(guildId, userId, activityName, date),
     );
 
     const label = activityName.charAt(0).toUpperCase() + activityName.slice(1);
@@ -337,7 +329,9 @@ export class DiscordService {
       return ephemeral(`Already logged **${label}** on ${date}.`);
     }
 
-    const { currentStreak } = await this.streakService.recomputeStreak(guildId, userId);
+    const { currentStreak } = await withRetry(() =>
+      this.streakService.recomputeStreak(guildId, userId),
+    );
 
     return {
       type: InteractionResponseType.ChannelMessageWithSource,

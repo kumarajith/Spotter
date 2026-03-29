@@ -19,9 +19,9 @@ export class DiscordConfigService {
     this.publicKey = process.env.DISCORD_PUBLIC_KEY ?? '';
     this.applicationId = process.env.DISCORD_APPLICATION_ID ?? '';
 
-    if (!this.publicKey || !this.botToken) {
+    if (!this.publicKey || !this.botToken || !this.applicationId) {
       throw new Error(
-        'Missing required Discord credentials (DISCORD_PUBLIC_KEY, DISCORD_BOT_TOKEN)',
+        'Missing required Discord credentials (DISCORD_PUBLIC_KEY, DISCORD_BOT_TOKEN, DISCORD_APPLICATION_ID)',
       );
     }
   }

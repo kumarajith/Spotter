@@ -25,32 +25,32 @@ Members log workouts by clicking buttons on a daily panel. Spotter tracks consec
 ---
 
 ## Architecture
+
 ![Architecture](spotter-architecture.svg)
 
 ### Key design decisions
 
-| Decision | Rationale |
-|---|---|
-| Webhook interactions over Gateway | Serverless-native — no idle process, scales to zero |
-| SQS between API and Consumer | Decouples Discord's 3 s deadline from DynamoDB writes |
-| Single DynamoDB table | All entities in one table with SK prefix routing; one env var, one IAM grant |
-| Pre-computed streaks | DynamoDB has no aggregation — write-time O(1) vs read-time scan of all logs |
-| EventBridge Scheduler (not Rules) | Native timezone support, per-schedule DLQ, flexible invocation windows |
-| SSM over Secrets Manager | Equivalent security at $0 vs $0.40/secret/month |
+| Decision                                 | Rationale                                                                                                      |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Webhook interactions over Gateway        | Serverless-native — no idle process, scales to zero                                                            |
+| Single DynamoDB table                    | All entities in one table with SK prefix routing; one env var, one IAM grant                                   |
+| Pre-computed streaks                     | DynamoDB has no aggregation — write-time O(1) vs read-time scan of all logs                                    |
+| EventBridge Scheduler (not Rules)        | Native timezone support, per-schedule DLQ, flexible invocation windows                                         |
+| Deploy-time secrets via SSM SecureString | CloudFormation dynamic references resolve at deploy — zero runtime latency, no IAM grants for SSM:GetParameter |
+| esbuild single-file bundles              | Tree-shaken ~760KB vs ~40MB node_modules — eliminates cold start from module resolution                        |
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Runtime | Node.js 24, TypeScript |
-| Framework | NestJS 11 |
-| HTTP Lambda | `@codegenie/serverless-express` |
-| Cloud | AWS Lambda, API Gateway (HTTP API v2), DynamoDB, SQS, EventBridge Scheduler, SSM, CloudWatch |
-| IaC | AWS CDK v2 (TypeScript) |
-| CI/CD | GitHub Actions + OIDC (no stored AWS credentials) |
-| Local dev | LocalStack via Docker |
+| Layer     | Technology                                                                              |
+| --------- | --------------------------------------------------------------------------------------- |
+| Runtime   | Node.js 24, TypeScript                                                                  |
+| Bundler   | esbuild                                                                                 |
+| Cloud     | AWS Lambda, API Gateway (HTTP API v2), DynamoDB, EventBridge Scheduler, SSM, CloudWatch |
+| IaC       | AWS CDK v2 (TypeScript)                                                                 |
+| CI/CD     | GitHub Actions + OIDC (no stored AWS credentials)                                       |
+| Local dev | LocalStack via Docker                                                                   |
 
 ---
 
@@ -88,11 +88,10 @@ DISCORD_PUBLIC_KEY=
 npm run local
 ```
 
-This starts LocalStack (DynamoDB + SQS), provisions the table and queue, then runs the API server and SQS consumer in parallel with labeled output.
+This starts LocalStack (DynamoDB only), provisions the table, then runs the API dev server.
 
 ```
-[API]      NestJS application listening on port 3000
-[CONSUMER] Polling SQS at http://localhost:4566...
+API server listening on port 3000
 ```
 
 **Subsequent runs** (Docker already running):
@@ -123,14 +122,14 @@ Set the resulting HTTPS URL + `/interactions` as the **Interactions Endpoint URL
 
 ## Discord Commands
 
-| Command | Description |
-|---|---|
-| `/setup` | Post the activity tracker panel in the current channel |
-| `/addactivity <name> <emoji>` | Add a custom activity for this server |
-| `/removeactivity <name>` | Remove a custom activity (with autocomplete) |
-| `/streak [user]` | Streak stats and 30-day activity heatmap |
-| `/leaderboard` | Top 10 current streaks and all-time bests |
-| `/backfill <date> <activity>` | Log a past date and recompute the streak |
+| Command                       | Description                                            |
+| ----------------------------- | ------------------------------------------------------ |
+| `/setup`                      | Post the activity tracker panel in the current channel |
+| `/addactivity <name> <emoji>` | Add a custom activity for this server                  |
+| `/removeactivity <name>`      | Remove a custom activity (with autocomplete)           |
+| `/streak [user]`              | Streak stats and 30-day activity heatmap               |
+| `/leaderboard`                | Top 10 current streaks and all-time bests              |
+| `/backfill <date> <activity>` | Log a past date and recompute the streak               |
 
 ---
 
@@ -144,13 +143,12 @@ Set the resulting HTTPS URL + `/interactions` as the **Interactions Endpoint URL
 cd infra && npx cdk bootstrap aws://<account-id>/ap-south-1
 ```
 
-**2. Create the Discord SSM parameter:**
+**2. Create the Discord SSM parameters:**
 
 ```bash
-aws ssm put-parameter \
-  --name "/spotter/dev/discord" \
-  --type SecureString \
-  --value '{"botToken":"...","publicKey":"...","applicationId":"..."}'
+aws ssm put-parameter --name "/spotter/dev/discord-bot-token" --type SecureString --value "..."
+aws ssm put-parameter --name "/spotter/dev/discord-public-key" --type SecureString --value "..."
+aws ssm put-parameter --name "/spotter/dev/discord-application-id" --type SecureString --value "..."
 ```
 
 **3. Set up GitHub Actions OIDC** (one-time, no stored credentials):
@@ -169,10 +167,10 @@ git push origin main
 
 ### CI/CD pipeline
 
-| Trigger | Action |
-|---|---|
-| Pull request to `main` | Lint → Test → Build → CDK synth |
-| Merge to `main` | Deploy dev (automatic) → Deploy prod (manual approval) |
+| Trigger                | Action                                                 |
+| ---------------------- | ------------------------------------------------------ |
+| Pull request to `main` | Lint → Test → Build → CDK synth                        |
+| Merge to `main`        | Deploy dev (automatic) → Deploy prod (manual approval) |
 
 ---
 
@@ -180,31 +178,27 @@ git push origin main
 
 ```
 ├── src/
-│   ├── lambda.ts                       # API Lambda entry point
-│   ├── app.module.ts
-│   ├── discord/                        # Interaction handler, signature guard, command routing
+│   ├── lambda.ts                       # API Lambda entry point (plain handler)
+│   ├── discord/                        # Interaction handler, command routing
 │   ├── activity/                       # Activity CRUD (/addactivity, /removeactivity)
 │   ├── tracking/                       # Log repository, streak service, streak repository
 │   ├── leaderboard/                    # Leaderboard service
 │   ├── panel/                          # Panel builder, poster, channel repository
-│   ├── consumer/                       # SQS consumer service
 │   ├── scheduler/                      # Daily task service (streak reset, panel repost)
-│   ├── sqs/                            # SQS producer
 │   ├── handlers/
-│   │   ├── sqs-consumer.handler.ts     # Consumer Lambda entry point
-│   │   └── scheduler.handler.ts        # Scheduler Lambda entry point
+│   │   └── scheduler.ts                # Scheduler Lambda entry point
 │   └── common/
-│       ├── config/                     # Discord credentials via SSM
+│       ├── config/                     # Discord credentials from env vars
 │       ├── dynamodb/                   # DynamoDB DocumentClient wrapper
-│       └── types/                      # dynamo.types.ts, sqs.types.ts
+│       ├── retry.ts                    # Retry utility with exponential backoff
+│       └── types/                      # dynamo.types.ts
 ├── infra/
 │   ├── bin/infra.ts
 │   └── lib/
 │       ├── spotter-stack.ts
 │       └── constructs/
-│           ├── api.ts                  # API Lambda + Consumer Lambda + API Gateway
+│           ├── api.ts                  # API Lambda + API Gateway
 │           ├── database.ts             # DynamoDB table + GSI
-│           ├── queue.ts                # SQS + DLQ
 │           ├── scheduler.ts            # Scheduler Lambda + EventBridge Schedule
 │           ├── secrets.ts              # SSM parameter reference
 │           ├── monitoring.ts           # CloudWatch alarms
@@ -212,9 +206,9 @@ git push origin main
 ├── scripts/
 │   ├── register-commands.ts            # Slash command registration
 │   ├── setup-local.ts                  # LocalStack provisioning
-│   ├── run-consumer.ts                 # Local SQS polling
+│   ├── dev-server.ts                   # Local API dev server
 │   └── migrate.ts                     # SQLite → DynamoDB migration
-├── legacy/                             # Original Discord.js bot (reference)
+├── esbuild.config.mjs
 └── .github/workflows/
     ├── ci.yml
     └── deploy.yml
@@ -226,16 +220,16 @@ git push origin main
 
 ### Commands
 
-| Command | Description |
-|---|---|
-| `npm run local` | First run — start Docker, provision, run app |
-| `npm run dev` | Start API + consumer (Docker already running) |
-| `npm run build` | TypeScript compile |
-| `npm run lint` | ESLint with auto-fix |
-| `npm run test` | Unit tests |
-| `npm run commands:register` | Register slash commands with Discord |
-| `npm run infra:synth` | Synthesize CloudFormation template |
-| `npm run infra:diff:dev` | Diff against deployed dev stack |
+| Command                     | Description                                   |
+| --------------------------- | --------------------------------------------- |
+| `npm run local`             | First run — start Docker, provision, run app  |
+| `npm run dev`               | Start API dev server (Docker already running) |
+| `npm run build`             | esbuild bundle to dist/                       |
+| `npm run lint`              | ESLint with auto-fix                          |
+| `npm run test`              | Unit tests                                    |
+| `npm run commands:register` | Register slash commands with Discord          |
+| `npm run infra:synth`       | Synthesize CloudFormation template            |
+| `npm run infra:diff:dev`    | Diff against deployed dev stack               |
 
 ### Testing
 
@@ -244,17 +238,14 @@ npm test                  # Unit tests (app)
 cd infra && npm test      # CDK template assertions
 ```
 
-80+ test cases covering:
+53 test cases covering:
 
-| Area | What's tested |
-|---|---|
-| Streak engine | Incremental updates, rest-day limits, same-day correction, backfill recompute |
-| Discord interactions | Command routing, button clicks, autocomplete, validation, error paths |
-| SQS consumer | Message processing, deferred responses, fetch failures, resilience |
-| Signature guard | Valid/invalid signatures, missing headers |
-| Type guards | Discriminated union validation for SQS messages |
-| Lambda handlers | Singleton bootstrap, batch processing, malformed input |
-| CDK infrastructure | DynamoDB config, SQS redrive, Lambda runtimes, CloudWatch alarms, API Gateway |
+| Area                 | What's tested                                                                 |
+| -------------------- | ----------------------------------------------------------------------------- |
+| Streak engine        | Incremental updates, rest-day limits, same-day correction, backfill recompute |
+| Discord interactions | Command routing, button clicks, autocomplete, validation, error paths         |
+| Lambda handlers      | Singleton bootstrap, error handling, malformed input                          |
+| CDK infrastructure   | DynamoDB config, Lambda runtimes, CloudWatch alarms, API Gateway              |
 
 ### DynamoDB single-table key design
 
@@ -294,10 +285,9 @@ npm run migrate -- --db legacy/spotter.db --guild 123456789 --dry-run
 ## Roadmap
 
 - [x] Core bot functionality (slash commands, activity logging, streaks)
-- [x] Async processing via SQS (deferred responses, DLQ)
 - [x] Daily automation (streak resets, panel reposts via EventBridge Scheduler)
 - [x] CI/CD with GitHub Actions + OIDC
-- [x] Unit tests (80+ tests across app and infrastructure)
+- [x] Unit tests (53 tests across app and infrastructure)
 - [x] CloudWatch alarm alerting via SNS email
 - [x] SQLite → DynamoDB migration script
 - [ ] **Observability** — structured JSON logging, correlation IDs across Lambda invocations, CloudWatch Logs Insights or Sentry integration
