@@ -1,25 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
-import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { Template, Match } from 'aws-cdk-lib/assertions';
 import { SpotterStack } from '../lib/spotter-stack';
-
-// Mock Code.fromAsset so we don't need an actual dist/ directory
-jest.mock('aws-cdk-lib/aws-lambda', () => {
-  const actual = jest.requireActual('aws-cdk-lib/aws-lambda');
-  const originalFromAsset = actual.Code.fromAsset;
-  actual.Code.fromAsset = function (path: string, ...args: unknown[]) {
-    // Create a temporary directory for the mock asset
-    const fs = require('fs');
-    const os = require('os');
-    const p = require('path');
-    const tmpDir = p.join(os.tmpdir(), 'cdk-mock-asset');
-    if (!fs.existsSync(tmpDir)) {
-      fs.mkdirSync(tmpDir, { recursive: true });
-    }
-    return originalFromAsset(tmpDir, ...args);
-  };
-  return actual;
-});
 
 function createTemplate(): Template {
   const app = new cdk.App();
@@ -42,14 +23,6 @@ describe('SpotterStack', () => {
     test('table has on-demand billing mode', () => {
       template.hasResourceProperties('AWS::DynamoDB::Table', {
         BillingMode: 'PAY_PER_REQUEST',
-      });
-    });
-
-    test('table has point-in-time recovery enabled', () => {
-      template.hasResourceProperties('AWS::DynamoDB::Table', {
-        PointInTimeRecoverySpecification: {
-          PointInTimeRecoveryEnabled: true,
-        },
       });
     });
 
@@ -78,79 +51,63 @@ describe('SpotterStack', () => {
     });
   });
 
-  // 2. SQS queue + DLQ with redrive policy (maxReceiveCount: 3)
+  // 2. No SQS (removed in v2 optimization)
   describe('SQS', () => {
-    test('processing queue and DLQ are created', () => {
-      template.resourceCountIs('AWS::SQS::Queue', 2);
-    });
-
-    test('processing queue has redrive policy with maxReceiveCount 3', () => {
-      template.hasResourceProperties('AWS::SQS::Queue', {
-        RedrivePolicy: Match.objectLike({
-          maxReceiveCount: 3,
-        }),
-      });
-    });
-
-    test('DLQ has 14-day retention period', () => {
-      template.hasResourceProperties('AWS::SQS::Queue', {
-        MessageRetentionPeriod: 1209600, // 14 days in seconds
-      });
+    test('no SQS queues are created', () => {
+      template.resourceCountIs('AWS::SQS::Queue', 0);
     });
   });
 
-  // 3. Three Lambda functions (API, Consumer, Scheduler)
+  // 3. Two Lambda functions (API + Scheduler) + log retention provider
   describe('Lambda', () => {
-    test('three application Lambda functions are created (plus log retention provider)', () => {
-      // 3 application Lambdas + 1 CDK-generated log retention custom resource provider
-      template.resourceCountIs('AWS::Lambda::Function', 4);
+    test('two application Lambda functions are created (plus log retention provider)', () => {
+      // 2 application Lambdas + 1 CDK-generated log retention custom resource provider
+      template.resourceCountIs('AWS::Lambda::Function', 3);
     });
 
     test('API Lambda exists with correct handler', () => {
       template.hasResourceProperties('AWS::Lambda::Function', {
         Handler: 'lambda.handler',
-        Runtime: 'nodejs24.x',
+        Runtime: 'nodejs22.x',
         MemorySize: 512,
-      });
-    });
-
-    test('Consumer Lambda exists with correct handler', () => {
-      template.hasResourceProperties('AWS::Lambda::Function', {
-        Handler: 'handlers/sqs-consumer.handler',
-        Runtime: 'nodejs24.x',
-        MemorySize: 256,
       });
     });
 
     test('Scheduler Lambda exists with correct handler', () => {
       template.hasResourceProperties('AWS::Lambda::Function', {
         Handler: 'handlers/scheduler.handler',
-        Runtime: 'nodejs24.x',
+        Runtime: 'nodejs22.x',
         MemorySize: 512,
         Timeout: 300, // 5 minutes
       });
     });
-  });
 
-  // 4. Three CloudWatch alarms exist
-  describe('CloudWatch Alarms', () => {
-    test('three alarms are created', () => {
-      template.resourceCountIs('AWS::CloudWatch::Alarm', 3);
-    });
-
-    test('DLQ alarm exists', () => {
-      template.hasResourceProperties('AWS::CloudWatch::Alarm', {
-        MetricName: 'ApproximateNumberOfMessagesVisible',
-        Threshold: 1,
-        EvaluationPeriods: 1,
+    test('API Lambda has Discord credential env vars', () => {
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        Handler: 'lambda.handler',
+        Environment: {
+          Variables: Match.objectLike({
+            DISCORD_BOT_TOKEN: Match.anyValue(),
+            DISCORD_PUBLIC_KEY: Match.anyValue(),
+            DISCORD_APPLICATION_ID: Match.anyValue(),
+            TABLE_NAME: Match.anyValue(),
+          }),
+        },
       });
     });
+  });
 
-    test('consumer error alarm exists', () => {
+  // 4. Two CloudWatch alarms (API + Scheduler errors)
+  describe('CloudWatch Alarms', () => {
+    test('two alarms are created', () => {
+      template.resourceCountIs('AWS::CloudWatch::Alarm', 2);
+    });
+
+    test('API error alarm exists', () => {
       template.hasResourceProperties('AWS::CloudWatch::Alarm', {
         MetricName: 'Errors',
         Threshold: 1,
-        AlarmDescription: 'SQS consumer Lambda errors detected',
+        AlarmDescription: 'API Lambda errors detected',
       });
     });
 
@@ -196,7 +153,7 @@ describe('SpotterStack', () => {
       const alarms = template.findResources('AWS::CloudWatch::Alarm');
       const alarmKeys = Object.keys(alarms);
 
-      expect(alarmKeys).toHaveLength(3);
+      expect(alarmKeys).toHaveLength(2);
 
       for (const key of alarmKeys) {
         const alarm = alarms[key];

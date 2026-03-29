@@ -1,9 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { DatabaseConstruct } from './constructs/database';
-import { QueueConstruct } from './constructs/queue';
 import { ApiConstruct } from './constructs/api';
-import { SecretsConstruct } from './constructs/secrets';
 import { SchedulerConstruct } from './constructs/scheduler';
 import { MonitoringConstruct } from './constructs/monitoring';
 import { NotificationsConstruct } from './constructs/notifications';
@@ -16,28 +14,42 @@ export class SpotterStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: SpotterStackProps) {
     super(scope, id, props);
 
+    // Resolve Discord credentials from SSM SecureString at deploy time.
+    // Values are injected into Lambda env vars via CloudFormation dynamic
+    // references — they never appear in the CloudFormation template.
+    //
+    // Create these params once per environment:
+    //   aws ssm put-parameter --name "/spotter/<env>/discord-bot-token" --type SecureString --value "..."
+    //   aws ssm put-parameter --name "/spotter/<env>/discord-public-key" --type SecureString --value "..."
+    //   aws ssm put-parameter --name "/spotter/<env>/discord-application-id" --type SecureString --value "..."
+    const paramPrefix = `/spotter/${props.environment}`;
+    const discordBotToken = cdk.SecretValue.ssmSecure(
+      `${paramPrefix}/discord-bot-token`,
+    ).unsafeUnwrap();
+    const discordPublicKey = cdk.SecretValue.ssmSecure(
+      `${paramPrefix}/discord-public-key`,
+    ).unsafeUnwrap();
+    const discordApplicationId = cdk.SecretValue.ssmSecure(
+      `${paramPrefix}/discord-application-id`,
+    ).unsafeUnwrap();
+
     const db = new DatabaseConstruct(this, 'Database', {
-      environment: props.environment,
-    });
-
-    const queue = new QueueConstruct(this, 'Queue', {
-      environment: props.environment,
-    });
-
-    const secrets = new SecretsConstruct(this, 'Secrets', {
       environment: props.environment,
     });
 
     const api = new ApiConstruct(this, 'Api', {
       table: db.table,
-      queue: queue.queue,
-      discordParam: secrets.discordParam,
+      discordBotToken,
+      discordPublicKey,
+      discordApplicationId,
       environment: props.environment,
     });
 
     const scheduler = new SchedulerConstruct(this, 'Scheduler', {
       table: db.table,
-      discordParam: secrets.discordParam,
+      discordBotToken,
+      discordPublicKey,
+      discordApplicationId,
       environment: props.environment,
     });
 
@@ -48,8 +60,7 @@ export class SpotterStack extends cdk.Stack {
     });
 
     new MonitoringConstruct(this, 'Monitoring', {
-      dlq: queue.dlq,
-      consumerLambda: api.consumerLambda,
+      apiLambda: api.apiLambda,
       schedulerLambda: scheduler.schedulerLambda,
       alarmTopic: notifications.topic,
     });
@@ -62,11 +73,6 @@ export class SpotterStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'TableName', {
       value: db.table.tableName,
       description: 'DynamoDB table name',
-    });
-
-    new cdk.CfnOutput(this, 'QueueUrl', {
-      value: queue.queue.queueUrl,
-      description: 'SQS processing queue URL',
     });
   }
 }

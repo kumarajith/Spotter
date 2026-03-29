@@ -1,8 +1,6 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
 import { ActivityRepository } from './activity.repository';
 import { ActivityItem } from '../common/types/dynamo.types';
 
-@Injectable()
 export class ActivityService {
   constructor(private readonly activityRepo: ActivityRepository) {}
 
@@ -22,9 +20,7 @@ export class ActivityService {
     userId: string,
   ): Promise<void> {
     if (!this.validateActivityName(displayName)) {
-      throw new BadRequestException(
-        'Activity name must be alphanumeric (spaces allowed), max 32 characters.',
-      );
+      throw new Error('Activity name must be alphanumeric (spaces allowed), max 32 characters.');
     }
     await this.activityRepo.putActivity(guildId, displayName, emoji, false, userId);
   }

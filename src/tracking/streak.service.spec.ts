@@ -1,9 +1,8 @@
-import { Test, TestingModule } from '@nestjs/testing';
 import { StreakService } from './streak.service';
 import { StreakRepository } from './streak.repository';
 import { StreakItem } from '../common/types/dynamo.types';
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// -- Helpers ------------------------------------------------------------------
 
 function makeStreak(overrides: Partial<StreakItem> = {}): StreakItem {
   const guildId = overrides.guildId ?? 'g1';
@@ -32,7 +31,7 @@ function makeStreak(overrides: Partial<StreakItem> = {}): StreakItem {
   };
 }
 
-// ── Test setup ───────────────────────────────────────────────────────────────
+// -- Test setup ---------------------------------------------------------------
 
 describe('StreakService', () => {
   let service: StreakService;
@@ -42,24 +41,20 @@ describe('StreakService', () => {
     getUserLogs: jest.Mock;
   };
 
-  beforeEach(async () => {
+  beforeEach(() => {
     repo = {
       getStreak: jest.fn(),
       putStreak: jest.fn(),
       getUserLogs: jest.fn(),
     };
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [StreakService, { provide: StreakRepository, useValue: repo }],
-    }).compile();
-
-    service = module.get(StreakService);
+    service = new StreakService(repo as unknown as StreakRepository);
   });
 
-  // ── processActivityLogged ────────────────────────────────────────────────
+  // -- processActivityLogged --------------------------------------------------
 
   describe('processActivityLogged', () => {
-    // ── Case A: gap or new user ──────────────────────────────────────────
+    // -- Case A: gap or new user ----------------------------------------------
 
     describe('Case A: gap or new user', () => {
       it('new user, non-rest -> streak 1', async () => {
@@ -102,7 +97,7 @@ describe('StreakService', () => {
       });
     });
 
-    // ── Case B: consecutive day ──────────────────────────────────────────
+    // -- Case B: consecutive day ----------------------------------------------
 
     describe('Case B: consecutive day', () => {
       it('post-break (currentStreak=0), non-rest -> streak 1', async () => {
@@ -200,7 +195,7 @@ describe('StreakService', () => {
       });
     });
 
-    // ── Case C: same day ─────────────────────────────────────────────────
+    // -- Case C: same day -----------------------------------------------------
 
     describe('Case C: same day', () => {
       it('non-rest after rest WITH pendingBreakState -> restores streak', async () => {
@@ -284,7 +279,7 @@ describe('StreakService', () => {
       });
     });
 
-    // ── putStreak verification ───────────────────────────────────────────
+    // -- putStreak verification -----------------------------------------------
 
     describe('putStreak shape', () => {
       it('builds correct StreakItem keys and padding', async () => {
@@ -316,7 +311,7 @@ describe('StreakService', () => {
     });
   });
 
-  // ── recomputeStreak ──────────────────────────────────────────────────────
+  // -- recomputeStreak --------------------------------------------------------
 
   describe('recomputeStreak', () => {
     beforeEach(() => {

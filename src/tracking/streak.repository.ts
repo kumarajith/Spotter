@@ -1,8 +1,6 @@
-import { Injectable } from '@nestjs/common';
 import { DynamoService } from '../common/dynamodb/dynamodb.service';
 import { StreakItem } from '../common/types/dynamo.types';
 
-@Injectable()
 export class StreakRepository {
   constructor(private readonly dynamo: DynamoService) {}
 

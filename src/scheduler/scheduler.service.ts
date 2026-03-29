@@ -1,4 +1,3 @@
-import { Injectable, Logger } from '@nestjs/common';
 import { REST } from '@discordjs/rest';
 import { Routes } from 'discord-api-types/v10';
 import { DiscordConfigService } from '../common/config/discord-config-service';
@@ -8,10 +7,7 @@ import { StreakRepository } from '../tracking/streak.repository';
 import { buildStreakSummaryEmbed } from '../panel/panel.builder';
 import { StreakItem } from '../common/types/dynamo.types';
 
-@Injectable()
 export class SchedulerService {
-  private readonly logger = new Logger(SchedulerService.name);
-
   constructor(
     private readonly panelRepository: PanelRepository,
     private readonly panelService: PanelService,
@@ -20,11 +16,11 @@ export class SchedulerService {
   ) {}
 
   async runDailyTasks(): Promise<void> {
-    this.logger.log('Starting daily tasks');
+    console.log('[Scheduler] Starting daily tasks');
 
     const allChannels = await this.panelRepository.getAllTrackedChannels();
     if (allChannels.length === 0) {
-      this.logger.log('No tracked channels found — nothing to do');
+      console.log('[Scheduler] No tracked channels found — nothing to do');
       return;
     }
 
@@ -41,11 +37,11 @@ export class SchedulerService {
       try {
         await this.processGuild(guildId, channels);
       } catch (err) {
-        this.logger.error(`Failed to process guild ${guildId}`, err);
+        console.error(`[Scheduler] Failed to process guild ${guildId}`, err);
       }
     }
 
-    this.logger.log('Daily tasks complete');
+    console.log('[Scheduler] Daily tasks complete');
   }
 
   private async processGuild(
@@ -82,14 +78,14 @@ export class SchedulerService {
           body: { embeds: [summaryEmbed] },
         });
       } catch (err) {
-        this.logger.error(`Failed to post summary to channel ${channelId}`, err);
+        console.error(`[Scheduler] Failed to post summary to channel ${channelId}`, err);
       }
 
       // Repost panel
       try {
         await this.panelService.repost(guildId, channelId, channel.lastPanelMessageId);
       } catch (err) {
-        this.logger.error(`Failed to repost panel to channel ${channelId}`, err);
+        console.error(`[Scheduler] Failed to repost panel to channel ${channelId}`, err);
       }
     }
   }

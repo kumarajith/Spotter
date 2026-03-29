@@ -1,4 +1,3 @@
-import { Injectable } from '@nestjs/common';
 import { REST } from '@discordjs/rest';
 import { Routes } from 'discord-api-types/v10';
 import { ActivityService } from '../activity/activity.service';
@@ -6,7 +5,6 @@ import { DiscordConfigService } from '../common/config/discord-config-service';
 import { buildPanel } from './panel.builder';
 import { PanelRepository } from './panel.repository';
 
-@Injectable()
 export class PanelService {
   constructor(
     private readonly activityService: ActivityService,

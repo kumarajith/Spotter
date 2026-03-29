@@ -1,4 +1,3 @@
-import { Injectable } from '@nestjs/common';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
@@ -16,7 +15,6 @@ import {
   TransactWriteCommandInput,
 } from '@aws-sdk/lib-dynamodb';
 
-@Injectable()
 export class DynamoService {
   private readonly client: DynamoDBDocumentClient;
   readonly tableName: string;
