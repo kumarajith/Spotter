@@ -1,4 +1,5 @@
 import * as cdk from 'aws-cdk-lib';
+import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
 import { DatabaseConstruct } from './constructs/database';
 import { ApiConstruct } from './constructs/api';
@@ -14,24 +15,27 @@ export class SpotterStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: SpotterStackProps) {
     super(scope, id, props);
 
-    // Resolve Discord credentials from SSM SecureString at deploy time.
+    // Resolve Discord credentials from SSM String parameters at deploy time.
     // Values are injected into Lambda env vars via CloudFormation dynamic
-    // references — they never appear in the CloudFormation template.
+    // references ({{resolve:ssm:...}}) — zero runtime latency, no IAM grants.
     //
     // Create these params once per environment:
-    //   aws ssm put-parameter --name "/spotter/<env>/discord-bot-token" --type SecureString --value "..."
-    //   aws ssm put-parameter --name "/spotter/<env>/discord-public-key" --type SecureString --value "..."
-    //   aws ssm put-parameter --name "/spotter/<env>/discord-application-id" --type SecureString --value "..."
+    //   aws ssm put-parameter --name "/spotter/<env>/discord-bot-token" --type String --value "..."
+    //   aws ssm put-parameter --name "/spotter/<env>/discord-public-key" --type String --value "..."
+    //   aws ssm put-parameter --name "/spotter/<env>/discord-application-id" --type String --value "..."
     const paramPrefix = `/spotter/${props.environment}`;
-    const discordBotToken = cdk.SecretValue.ssmSecure(
+    const discordBotToken = ssm.StringParameter.valueForStringParameter(
+      this,
       `${paramPrefix}/discord-bot-token`,
-    ).unsafeUnwrap();
-    const discordPublicKey = cdk.SecretValue.ssmSecure(
+    );
+    const discordPublicKey = ssm.StringParameter.valueForStringParameter(
+      this,
       `${paramPrefix}/discord-public-key`,
-    ).unsafeUnwrap();
-    const discordApplicationId = cdk.SecretValue.ssmSecure(
+    );
+    const discordApplicationId = ssm.StringParameter.valueForStringParameter(
+      this,
       `${paramPrefix}/discord-application-id`,
-    ).unsafeUnwrap();
+    );
 
     const db = new DatabaseConstruct(this, 'Database', {
       environment: props.environment,
