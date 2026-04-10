@@ -206,8 +206,7 @@ git push origin main
 ├── scripts/
 │   ├── register-commands.ts            # Slash command registration
 │   ├── setup-local.ts                  # LocalStack provisioning
-│   ├── dev-server.ts                   # Local API dev server
-│   └── migrate.ts                     # SQLite → DynamoDB migration
+│   └── dev-server.ts                   # Local API dev server
 ├── esbuild.config.mjs
 └── .github/workflows/
     ├── ci.yml
@@ -260,28 +259,6 @@ Channel         GUILD#<id>        CHANNEL#<channelId>         —               
 
 ---
 
-## Migration (SQLite → DynamoDB)
-
-If migrating from the legacy Discord.js bot (v1):
-
-```bash
-# Dry run — validate without writing
-npm run migrate -- --db legacy/spotter.db --dry-run
-
-# Run for real against local DynamoDB
-npm run migrate -- --db legacy/spotter.db --endpoint http://localhost:4566
-
-# Run against AWS (uses default credentials)
-npm run migrate -- --db legacy/spotter.db --table-name spotter-prod
-
-# Migrate a single guild for testing
-npm run migrate -- --db legacy/spotter.db --guild 123456789 --dry-run
-```
-
-**Cutover steps**: dry-run → stop legacy bot → run migration → deploy v2 → register slash commands → verify → keep SQLite backup.
-
----
-
 ## Roadmap
 
 - [x] Core bot functionality (slash commands, activity logging, streaks)
@@ -289,7 +266,6 @@ npm run migrate -- --db legacy/spotter.db --guild 123456789 --dry-run
 - [x] CI/CD with GitHub Actions + OIDC
 - [x] Unit tests (53 tests across app and infrastructure)
 - [x] CloudWatch alarm alerting via SNS email
-- [x] SQLite → DynamoDB migration script
 - [ ] **Observability** — structured JSON logging, correlation IDs across Lambda invocations, CloudWatch Logs Insights or Sentry integration
 - [ ] **Dashboard** — CloudWatch dashboard or Grafana for key metrics (latency, error rates, streak activity)
 

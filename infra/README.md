@@ -1,14 +1,18 @@
-# Welcome to your CDK TypeScript project
+# Spotter Infrastructure
 
-This is a blank project for CDK development with TypeScript.
+AWS CDK app that provisions the Spotter stack (DynamoDB, Lambda, API Gateway, EventBridge Scheduler, CloudWatch).
 
-The `cdk.json` file tells the CDK Toolkit how to execute your app.
+## Commands
 
-## Useful commands
+| Command                      | Description                               |
+| ---------------------------- | ----------------------------------------- |
+| `npm run build`              | Compile TypeScript                        |
+| `npm test`                   | CDK template assertions                   |
+| `npx cdk synth -c env=dev`   | Synthesize CloudFormation template        |
+| `npx cdk diff -c env=dev`    | Compare deployed stack with current state |
+| `npx cdk deploy -c env=dev`  | Deploy to dev                             |
+| `npx cdk deploy -c env=prod` | Deploy to prod                            |
 
-* `npm run build`   compile typescript to js
-* `npm run watch`   watch for changes and compile
-* `npm run test`    perform the jest unit tests
-* `npx cdk deploy`  deploy this stack to your default AWS account/region
-* `npx cdk diff`    compare deployed stack with current state
-* `npx cdk synth`   emits the synthesized CloudFormation template
+## Environments
+
+Environment separation is handled via CDK context (`-c env=dev` / `-c env=prod`). Each environment gets its own stack (`Spotter-dev`, `Spotter-prod`).
