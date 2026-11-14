@@ -51,12 +51,6 @@ describe('SpotterStack', () => {
 
   // 1b. DynamoDB table (pre-v4 store, mirrored during the cutover)
   describe('DynamoDB', () => {
-    test('table has point-in-time recovery enabled', () => {
-      template.hasResourceProperties('AWS::DynamoDB::Table', {
-        PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true },
-      });
-    });
-
     test('table has on-demand billing mode', () => {
       template.hasResourceProperties('AWS::DynamoDB::Table', {
         BillingMode: 'PAY_PER_REQUEST',

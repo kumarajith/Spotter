@@ -245,7 +245,7 @@ npm test                  # App: unit tests + SQL tests against in-process Postg
 cd infra && npm test      # CDK template assertions (run `npm run build` first)
 ```
 
-138 test cases (109 app, 29 infrastructure) covering:
+137 test cases (109 app, 28 infrastructure) covering:
 
 | Area                 | What's tested                                                                          |
 | -------------------- | -------------------------------------------------------------------------------------- |
@@ -288,7 +288,7 @@ v4 moved the data from DynamoDB to Aurora DSQL. Until the DynamoDB table is reti
 - [x] Core bot functionality (slash commands, activity logging, streaks)
 - [x] Daily automation (streak resets, panel reposts via EventBridge Scheduler)
 - [x] CI/CD with GitHub Actions + OIDC
-- [x] Unit tests (138 tests across app and infrastructure)
+- [x] Unit tests (137 tests across app and infrastructure)
 - [x] CloudWatch alarm alerting via SNS email
 - [x] Relational data layer on Aurora DSQL, streaks derived from logs (v4)
 - [ ] Retire the DynamoDB table and the write mirror once v4 is confirmed
