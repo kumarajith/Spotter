@@ -18,8 +18,45 @@ describe('SpotterStack', () => {
     template = createTemplate();
   });
 
-  // 1. DynamoDB table with on-demand billing + PITR + GSI1
+  // 1. Aurora DSQL cluster — the primary database
+  describe('Aurora DSQL', () => {
+    test('one cluster is created', () => {
+      template.resourceCountIs('AWS::DSQL::Cluster', 1);
+    });
+
+    test('app Lambdas get the cluster endpoint and may connect as admin', () => {
+      for (const handler of ['lambda.handler', 'handlers/scheduler.handler']) {
+        template.hasResourceProperties('AWS::Lambda::Function', {
+          Handler: handler,
+          Environment: { Variables: Match.objectLike({ DSQL_ENDPOINT: Match.anyValue() }) },
+        });
+      }
+      const policies = JSON.stringify(template.findResources('AWS::IAM::Policy'));
+      expect(policies.match(/dsql:DbConnectAdmin/g)?.length).toBeGreaterThanOrEqual(2);
+    });
+
+    test('prod cluster is deletion-protected and retained', () => {
+      const prod = Template.fromStack(
+        new SpotterStack(new cdk.App(), 'ProdStack', {
+          environment: 'prod',
+          env: { region: 'ap-south-1', account: '123456789012' },
+        }),
+      );
+      prod.hasResource('AWS::DSQL::Cluster', {
+        Properties: { DeletionProtectionEnabled: true },
+        DeletionPolicy: 'Retain',
+      });
+    });
+  });
+
+  // 1b. DynamoDB table (pre-v4 store, mirrored during the cutover)
   describe('DynamoDB', () => {
+    test('table has point-in-time recovery enabled', () => {
+      template.hasResourceProperties('AWS::DynamoDB::Table', {
+        PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true },
+      });
+    });
+
     test('table has on-demand billing mode', () => {
       template.hasResourceProperties('AWS::DynamoDB::Table', {
         BillingMode: 'PAY_PER_REQUEST',
@@ -58,11 +95,29 @@ describe('SpotterStack', () => {
     });
   });
 
-  // 3. Two Lambda functions (API + Scheduler) + log retention provider
+  // 3. Lambda functions: API + Scheduler, the data-ops functions, and CDK's own providers
   describe('Lambda', () => {
-    test('two application Lambda functions are created (plus log retention provider)', () => {
-      // 2 application Lambdas + 1 CDK-generated log retention custom resource provider
-      template.resourceCountIs('AWS::Lambda::Function', 3);
+    test('application, data-ops and CDK provider functions are created', () => {
+      // 2 application + 4 data-ops + log retention provider + deploy trigger provider
+      template.resourceCountIs('AWS::Lambda::Function', 8);
+    });
+
+    test.each([
+      ['spotter-test-migrate', 'handlers/data-ops.migrate'],
+      ['spotter-test-import-legacy', 'handlers/data-ops.importLegacy'],
+      ['spotter-test-verify', 'handlers/data-ops.verify'],
+      ['spotter-test-recompute-legacy-streaks', 'handlers/data-ops.recomputeLegacyStreaks'],
+    ])('data-ops function %s exists', (FunctionName, Handler) => {
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName,
+        Handler,
+        Environment: {
+          Variables: Match.objectLike({
+            DSQL_ENDPOINT: Match.anyValue(),
+            TABLE_NAME: Match.anyValue(),
+          }),
+        },
+      });
     });
 
     test('API Lambda exists with correct handler', () => {
@@ -94,6 +149,43 @@ describe('SpotterStack', () => {
           }),
         },
       });
+    });
+  });
+
+  // 3b. Deploy ordering: migrate -> import -> app Lambdas update -> import again
+  describe('Deploy triggers', () => {
+    const logicalId = (resources: Record<string, unknown>, match: RegExp) => {
+      const ids = Object.keys(resources).filter((id) => match.test(id));
+      expect(ids).toHaveLength(1);
+      return ids[0];
+    };
+
+    test('three triggers run on deploy', () => {
+      template.resourceCountIs('Custom::Trigger', 3);
+    });
+
+    test('app Lambdas wait for the migration and the first import', () => {
+      const triggers = template.findResources('Custom::Trigger');
+      const migrate = logicalId(triggers, /MigrateOnDeploy/);
+      const importBefore = logicalId(triggers, /ImportBeforeSwitch/);
+
+      const functions = template.findResources('AWS::Lambda::Function');
+      for (const handler of ['lambda.handler', 'handlers/scheduler.handler']) {
+        const fn = Object.values(functions).find((f) => f.Properties.Handler === handler);
+        expect(fn?.DependsOn).toEqual(expect.arrayContaining([migrate, importBefore]));
+      }
+      expect(triggers[importBefore].DependsOn).toEqual(expect.arrayContaining([migrate]));
+    });
+
+    test('the second import waits for both app Lambdas', () => {
+      const triggers = template.findResources('Custom::Trigger');
+      const importAfter = triggers[logicalId(triggers, /ImportAfterSwitch/)];
+
+      const functions = template.findResources('AWS::Lambda::Function');
+      for (const handler of ['lambda.handler', 'handlers/scheduler.handler']) {
+        const [id] = Object.entries(functions).find(([, f]) => f.Properties.Handler === handler)!;
+        expect(importAfter.DependsOn).toEqual(expect.arrayContaining([id]));
+      }
     });
   });
 

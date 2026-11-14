@@ -31,5 +31,8 @@ jobs:
       - name: Install infra dependencies
         run: cd infra && npm ci
 
+      - name: Test infra
+        run: cd infra && npm test
+
       - name: Synth CDK (dev)
         run: cd infra && npx cdk synth -c env=dev
