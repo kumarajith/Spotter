@@ -206,7 +206,7 @@ describe('StreakRepository (streak_runs view)', () => {
     /** Walks the calendar day by day; shares no technique with the SQL. */
     function referenceStreak(kinds: Kind[], lastDay: string): { current: number; best: number } {
       const breaker = new Set<number>();
-      for (let i = 0; i < kinds.length; ) {
+      for (let i = 0; i < kinds.length;) {
         if (kinds[i] !== 'rest') {
           i++;
           continue;
