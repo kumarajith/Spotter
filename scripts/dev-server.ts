@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import './local-env';
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { handler } from '../src/lambda';
 

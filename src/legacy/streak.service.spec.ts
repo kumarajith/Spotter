@@ -1,6 +1,6 @@
 import { StreakService } from './streak.service';
 import { StreakRepository } from './streak.repository';
-import { StreakItem } from '../common/types/dynamo.types';
+import { StreakItem } from './dynamo.types';
 
 // -- Helpers ------------------------------------------------------------------
 
@@ -407,7 +407,9 @@ describe('StreakService', () => {
         { date: '2025-06-12', activityName: 'push-ups' },
         { date: '2025-06-11', activityName: 'push-ups' },
       ];
-      repo.getStreak.mockResolvedValue(makeStreak({ currentStreak: 1, lastLoggedDate: '2025-06-15' }));
+      repo.getStreak.mockResolvedValue(
+        makeStreak({ currentStreak: 1, lastLoggedDate: '2025-06-15' }),
+      );
       repo.getUserLogs.mockResolvedValue(logs);
 
       const result = await service.recomputeStreak('g1', 'u1', {

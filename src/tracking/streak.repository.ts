@@ -1,86 +1,72 @@
-import { DynamoService } from '../common/dynamodb/dynamodb.service';
-import { StreakItem } from '../common/types/dynamo.types';
+import { UserStreak } from '../common/types/models';
+import { Db } from '../db/db';
 
+/**
+ * Streaks are never stored. They are read from the `streak_runs` view, which
+ * derives them from activity_logs (see src/db/migrations/0001_init.ts for the rule).
+ *
+ * `today` is always passed in (UTC, YYYY-MM-DD): a streak is "current" when it
+ * reaches today or yesterday, so a missed day ends it without anything being written.
+ */
 export class StreakRepository {
-  constructor(private readonly dynamo: DynamoService) {}
+  constructor(private readonly db: Db) {}
 
-  async getStreak(guildId: string, userId: string): Promise<StreakItem | null> {
-    const result = await this.dynamo.get({
-      PK: `GUILD#${guildId}`,
-      SK: `STREAK#${userId}`,
-    });
-    return (result.Item as StreakItem | undefined) ?? null;
+  async getUserStreak(guildId: string, userId: string, today: string): Promise<UserStreak> {
+    const [row] = await this.db.query<{ current_streak: number; best_streak: number }>(
+      `SELECT
+         CAST(COALESCE(MAX(CASE WHEN r.end_date >= $3::date - 1 THEN r.length ELSE 0 END), 0)
+              AS integer) AS current_streak,
+         CAST(GREATEST(
+                COALESCE(MAX(r.length), 0),
+                COALESCE((SELECT f.best_streak FROM legacy_best_streaks f
+                          WHERE f.guild_id = $1 AND f.user_id = $2), 0))
+              AS integer) AS best_streak
+       FROM streak_runs r
+       WHERE r.guild_id = $1 AND r.user_id = $2`,
+      [guildId, userId, today],
+    );
+    return { userId, currentStreak: row.current_streak, bestStreak: row.best_streak };
   }
 
-  async putStreak(item: StreakItem): Promise<void> {
-    // Enforce GSI1SK padding — ensures leaderboard queries sort correctly
-    const padded = item.currentStreak.toString().padStart(5, '0');
-    const normalized: StreakItem = {
-      ...item,
-      GSI1SK: `STREAK#${padded}`,
-      currentStreakPadded: padded,
-    };
-    await this.dynamo.put(normalized as unknown as Record<string, unknown>);
-  }
+  /** Every user in the guild who has ever logged (or has a pre-v4 best streak on record). */
+  async getGuildStreaks(guildId: string, today: string): Promise<UserStreak[]> {
+    const derived = await this.db.query<{
+      user_id: string;
+      current_streak: number;
+      best_streak: number;
+    }>(
+      `SELECT user_id,
+              CAST(MAX(CASE WHEN end_date >= $2::date - 1 THEN length ELSE 0 END) AS integer)
+                AS current_streak,
+              CAST(MAX(length) AS integer) AS best_streak
+       FROM streak_runs
+       WHERE guild_id = $1
+       GROUP BY user_id`,
+      [guildId, today],
+    );
+    const floors = await this.db.query<{ user_id: string; best_streak: number }>(
+      'SELECT user_id, best_streak FROM legacy_best_streaks WHERE guild_id = $1',
+      [guildId],
+    );
 
-  /**
-   * Returns top N users by current streak for the guild leaderboard.
-   * Queries GSI1 DESC, excluding users with a 0 streak.
-   */
-  async getTopCurrentStreaks(guildId: string, limit = 10): Promise<StreakItem[]> {
-    const result = await this.dynamo.query({
-      IndexName: 'GSI1',
-      KeyConditionExpression: 'GSI1PK = :pk AND GSI1SK > :zero',
-      ExpressionAttributeValues: {
-        ':pk': `LEADERBOARD#${guildId}`,
-        ':zero': 'STREAK#00000',
-      },
-      ScanIndexForward: false,
-      Limit: limit,
-    });
-
-    return (result.Items ?? []) as StreakItem[];
-  }
-
-  /**
-   * Returns all streak items for a guild.
-   * Used to compute all-time best by sorting on longestStreak in app code.
-   * Hard cap of 500 items — sufficient for fitness guild scale.
-   */
-  async getAllGuildStreaks(guildId: string): Promise<StreakItem[]> {
-    const result = await this.dynamo.query({
-      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :skPrefix)',
-      ExpressionAttributeValues: {
-        ':pk': `GUILD#${guildId}`,
-        ':skPrefix': 'STREAK#',
-      },
-      Limit: 500,
-    });
-
-    return (result.Items ?? []) as StreakItem[];
-  }
-
-  /**
-   * Returns all activity logs for a user in a guild, sorted DESC by date.
-   * Used by recomputeStreak() for backfill.
-   */
-  async getUserLogs(
-    guildId: string,
-    userId: string,
-  ): Promise<Array<{ date: string; activityName: string }>> {
-    const result = await this.dynamo.query({
-      IndexName: 'GSI1',
-      KeyConditionExpression: 'GSI1PK = :pk AND begins_with(GSI1SK, :skPrefix)',
-      ExpressionAttributeValues: {
-        ':pk': `USER#${userId}`,
-        ':skPrefix': `LOG#${guildId}#`,
-      },
-      ScanIndexForward: false, // DESC — newest first, matching legacy sort order
-    });
-
-    return (result.Items ?? []).map((item) => ({
-      date: item['date'] as string,
-      activityName: item['activityName'] as string,
-    }));
+    const byUser = new Map<string, UserStreak>(
+      derived.map((r) => [
+        r.user_id,
+        { userId: r.user_id, currentStreak: r.current_streak, bestStreak: r.best_streak },
+      ]),
+    );
+    for (const floor of floors) {
+      const streak = byUser.get(floor.user_id);
+      if (streak) {
+        streak.bestStreak = Math.max(streak.bestStreak, floor.best_streak);
+      } else {
+        byUser.set(floor.user_id, {
+          userId: floor.user_id,
+          currentStreak: 0,
+          bestStreak: floor.best_streak,
+        });
+      }
+    }
+    return [...byUser.values()];
   }
 }

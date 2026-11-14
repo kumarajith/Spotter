@@ -1,13 +1,13 @@
 import { ActionRowBuilder, ButtonBuilder, EmbedBuilder } from '@discordjs/builders';
 import { ButtonStyle } from 'discord-api-types/v10';
-import { ActivityItem, StreakItem } from '../common/types/dynamo.types';
+import { Activity, UserStreak } from '../common/types/models';
 
 export interface PanelPayload {
   embeds?: ReturnType<EmbedBuilder['toJSON']>[];
   components: ReturnType<ActionRowBuilder<ButtonBuilder>['toJSON']>[];
 }
 
-export function buildPanel(activities: ActivityItem[]): PanelPayload[] {
+export function buildPanel(activities: Activity[]): PanelPayload[] {
   const today = new Date().toISOString().slice(0, 10);
 
   const embed = new EmbedBuilder()
@@ -19,7 +19,7 @@ export function buildPanel(activities: ActivityItem[]): PanelPayload[] {
 
   const buttons = activities.map((activity) => {
     const button = new ButtonBuilder()
-      .setCustomId(`log_activity:${activity.displayName.toLowerCase()}`)
+      .setCustomId(`log_activity:${activity.name}`)
       .setLabel(activity.displayName)
       .setStyle(ButtonStyle.Secondary);
 
@@ -48,7 +48,7 @@ export function buildPanel(activities: ActivityItem[]): PanelPayload[] {
   ];
 }
 
-export function buildStreakSummaryEmbed(streaks: StreakItem[]): ReturnType<EmbedBuilder['toJSON']> {
+export function buildStreakSummaryEmbed(streaks: UserStreak[]): ReturnType<EmbedBuilder['toJSON']> {
   const today = new Date().toISOString().slice(0, 10);
 
   // Group by currentStreak descending

@@ -10,7 +10,6 @@ import { DiscordService } from './discord.service';
 import { ActivityService } from '../activity/activity.service';
 import { PanelService } from '../panel/panel.service';
 import { DiscordConfigService } from '../common/config/discord-config-service';
-import { StreakService } from '../tracking/streak.service';
 import { StreakRepository } from '../tracking/streak.repository';
 import { TrackingRepository } from '../tracking/tracking.repository';
 import { COMMANDS } from './commands';
@@ -71,10 +70,7 @@ describe('DiscordService', () => {
     Pick<ActivityService, 'getActivities' | 'addActivity' | 'removeActivity'>
   >;
   let panelService: jest.Mocked<Pick<PanelService, 'setup'>>;
-  let streakService: jest.Mocked<Pick<StreakService, 'processActivityLogged' | 'recomputeStreak'>>;
-  let streakRepository: jest.Mocked<
-    Pick<StreakRepository, 'getStreak' | 'getTopCurrentStreaks' | 'getAllGuildStreaks'>
-  >;
+  let streakRepository: jest.Mocked<Pick<StreakRepository, 'getUserStreak' | 'getGuildStreaks'>>;
   let trackingRepository: jest.Mocked<
     Pick<TrackingRepository, 'logActivity' | 'getUserLogsForRange' | 'getUserActivityCounts'>
   >;
@@ -92,15 +88,11 @@ describe('DiscordService', () => {
 
     const discordConfig = { applicationId: 'app-123' } as DiscordConfigService;
 
-    streakService = {
-      processActivityLogged: jest.fn().mockResolvedValue({ currentStreak: 1 }),
-      recomputeStreak: jest.fn().mockResolvedValue({ currentStreak: 1, longestStreak: 1 }),
-    };
-
     streakRepository = {
-      getStreak: jest.fn().mockResolvedValue(null),
-      getTopCurrentStreaks: jest.fn().mockResolvedValue([]),
-      getAllGuildStreaks: jest.fn().mockResolvedValue([]),
+      getUserStreak: jest
+        .fn()
+        .mockResolvedValue({ userId: 'user-1', currentStreak: 0, bestStreak: 0 }),
+      getGuildStreaks: jest.fn().mockResolvedValue([]),
     };
 
     trackingRepository = {
@@ -113,7 +105,6 @@ describe('DiscordService', () => {
       activityService as unknown as ActivityService,
       panelService as unknown as PanelService,
       discordConfig,
-      streakService as unknown as StreakService,
       streakRepository as unknown as StreakRepository,
       trackingRepository as unknown as TrackingRepository,
     );
@@ -240,7 +231,12 @@ describe('DiscordService', () => {
   // -----------------------------------------------------------------------
 
   describe('handleLogActivity', () => {
-    it('logs activity, processes streak, and returns public message', async () => {
+    it('logs activity, reads the streak, and returns public message', async () => {
+      streakRepository.getUserStreak.mockResolvedValueOnce({
+        userId: 'user-1',
+        currentStreak: 12,
+        bestStreak: 30,
+      });
       const interaction = makeComponentInteraction('log_activity:push');
 
       const result = await service.handleComponent(interaction as any);
@@ -251,15 +247,14 @@ describe('DiscordService', () => {
         'push',
         expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
       );
-      expect(streakService.processActivityLogged).toHaveBeenCalledWith(
+      expect(streakRepository.getUserStreak).toHaveBeenCalledWith(
         'guild-1',
         'user-1',
-        'push',
         expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
       );
       expect(result).toEqual({
         type: InteractionResponseType.ChannelMessageWithSource,
-        data: { content: expect.stringContaining('logged **Push**') },
+        data: { content: '<@user-1> logged **Push** — **12-day** streak 🔥' },
       });
     });
 
@@ -270,7 +265,7 @@ describe('DiscordService', () => {
 
       const result = await service.handleComponent(interaction as any);
 
-      expect(streakService.processActivityLogged).not.toHaveBeenCalled();
+      expect(streakRepository.getUserStreak).not.toHaveBeenCalled();
       expect(result.type).toBe(InteractionResponseType.ChannelMessageWithSource);
       expect((result.data as EphemeralData).content).toContain('Already logged');
       expect((result.data as EphemeralData).flags).toBe(MessageFlags.Ephemeral);
@@ -332,7 +327,24 @@ describe('DiscordService', () => {
       expect((result.data as EphemeralData).flags).toBe(MessageFlags.Ephemeral);
     });
 
-    it('logs activity, recomputes streak, and returns public message', async () => {
+    it('returns error for a date that does not exist', async () => {
+      const interaction = makeCommandInteraction(COMMANDS.BACKFILL, [
+        stringOption('date', '2025-02-31'),
+        stringOption('activity', 'push'),
+      ]);
+
+      const result = await service.handleCommand(interaction as any);
+
+      expect(trackingRepository.logActivity).not.toHaveBeenCalled();
+      expect((result.data as EphemeralData).content).toContain('Invalid date');
+    });
+
+    it('logs the past date, reads the streak as of today, and returns public message', async () => {
+      streakRepository.getUserStreak.mockResolvedValueOnce({
+        userId: 'user-1',
+        currentStreak: 5,
+        bestStreak: 5,
+      });
       const interaction = makeCommandInteraction(COMMANDS.BACKFILL, [
         stringOption('date', '2025-01-15'),
         stringOption('activity', 'Push'),
@@ -346,13 +358,13 @@ describe('DiscordService', () => {
         'push',
         '2025-01-15',
       );
-      expect(streakService.recomputeStreak).toHaveBeenCalledWith('guild-1', 'user-1', {
-        date: '2025-01-15',
-        activityName: 'push',
-      });
+      const today = new Date().toISOString().slice(0, 10);
+      expect(streakRepository.getUserStreak).toHaveBeenCalledWith('guild-1', 'user-1', today);
       expect(result).toEqual({
         type: InteractionResponseType.ChannelMessageWithSource,
-        data: { content: expect.stringContaining('backfilled **Push**') },
+        data: {
+          content: '<@user-1> backfilled **Push** for 2025-01-15 — **5-day** streak 🔥',
+        },
       });
     });
 
@@ -366,7 +378,7 @@ describe('DiscordService', () => {
 
       const result = await service.handleCommand(interaction as any);
 
-      expect(streakService.recomputeStreak).not.toHaveBeenCalled();
+      expect(streakRepository.getUserStreak).not.toHaveBeenCalled();
       expect(result.type).toBe(InteractionResponseType.ChannelMessageWithSource);
       expect((result.data as EphemeralData).content).toContain('Already logged');
       expect((result.data as EphemeralData).flags).toBe(MessageFlags.Ephemeral);
@@ -388,11 +400,8 @@ describe('DiscordService', () => {
     });
 
     it('returns embed with leaderboard data when streaks exist', async () => {
-      streakRepository.getTopCurrentStreaks.mockResolvedValueOnce([
-        { userId: 'user-1', currentStreak: 5 } as any,
-      ]);
-      streakRepository.getAllGuildStreaks.mockResolvedValueOnce([
-        { userId: 'user-1', longestStreak: 10 } as any,
+      streakRepository.getGuildStreaks.mockResolvedValueOnce([
+        { userId: 'user-1', currentStreak: 5, bestStreak: 10 },
       ]);
 
       const interaction = makeCommandInteraction(COMMANDS.LEADERBOARD);
@@ -403,6 +412,89 @@ describe('DiscordService', () => {
       expect(result.data).toHaveProperty('embeds');
       const embeds = (result.data as { embeds: { title: string }[] }).embeds;
       expect(embeds[0].title).toContain('Leaderboard');
+    });
+
+    it('ranks current and all-time separately and leaves out zeros', async () => {
+      streakRepository.getGuildStreaks.mockResolvedValueOnce([
+        { userId: 'lapsed', currentStreak: 0, bestStreak: 40 },
+        { userId: 'steady', currentStreak: 9, bestStreak: 9 },
+        { userId: 'new', currentStreak: 2, bestStreak: 2 },
+      ]);
+
+      const result = await service.handleCommand(
+        makeCommandInteraction(COMMANDS.LEADERBOARD) as any,
+      );
+
+      const [current, allTime] = (
+        result.data as { embeds: { fields: { value: string }[] }[] }
+      ).embeds[0].fields.map((f) => f.value);
+      expect(current).toBe('1. <@steady> — 9 days 🔥\n2. <@new> — 2 days 🔥');
+      expect(allTime).toBe('1. <@lapsed> — 40 days\n2. <@steady> — 9 days\n3. <@new> — 2 days');
+    });
+
+    it('shows at most ten per list', async () => {
+      streakRepository.getGuildStreaks.mockResolvedValueOnce(
+        Array.from({ length: 15 }, (_, i) => ({
+          userId: `u${i}`,
+          currentStreak: i + 1,
+          bestStreak: i + 1,
+        })),
+      );
+
+      const result = await service.handleCommand(
+        makeCommandInteraction(COMMANDS.LEADERBOARD) as any,
+      );
+
+      const [current] = (
+        result.data as { embeds: { fields: { value: string }[] }[] }
+      ).embeds[0].fields.map((f) => f.value);
+      expect(current.split('\n')).toHaveLength(10);
+      expect(current.split('\n')[0]).toContain('<@u14> — 15 days');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // handleStreak
+  // -----------------------------------------------------------------------
+
+  describe('handleStreak', () => {
+    it('returns ephemeral message when the user has never logged', async () => {
+      const result = await service.handleCommand(makeCommandInteraction(COMMANDS.STREAK) as any);
+
+      expect((result.data as EphemeralData).content).toContain('No activity logged yet');
+      expect((result.data as EphemeralData).flags).toBe(MessageFlags.Ephemeral);
+    });
+
+    it('shows current streak, best streak, breakdown and a 30-day grid', async () => {
+      const today = new Date().toISOString().slice(0, 10);
+      streakRepository.getUserStreak.mockResolvedValueOnce({
+        userId: 'user-1',
+        currentStreak: 3,
+        bestStreak: 21,
+      });
+      trackingRepository.getUserLogsForRange.mockResolvedValueOnce([
+        { date: today, activityName: 'push' },
+      ]);
+      trackingRepository.getUserActivityCounts.mockResolvedValueOnce(
+        new Map([
+          ['push', 14],
+          ['rest', 4],
+        ]),
+      );
+
+      const result = await service.handleCommand(makeCommandInteraction(COMMANDS.STREAK) as any);
+
+      expect(streakRepository.getUserStreak).toHaveBeenCalledWith('guild-1', 'user-1', today);
+      const fields = (result.data as { embeds: { fields: { name: string; value: string }[] }[] })
+        .embeds[0].fields;
+      expect(fields.map((f) => f.value).slice(0, 3)).toEqual([
+        '3 days',
+        '21 days',
+        'Push ×14\nRest ×4',
+      ]);
+      const grid = fields[3].value.replace(/\n/g, '');
+      expect([...grid]).toHaveLength(30);
+      expect(grid.endsWith('🟩')).toBe(true);
     });
   });
 });

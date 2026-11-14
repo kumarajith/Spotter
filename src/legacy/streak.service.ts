@@ -1,4 +1,4 @@
-import { PendingBreakState, StreakItem } from '../common/types/dynamo.types';
+import { PendingBreakState, StreakItem } from './dynamo.types';
 import { StreakRepository } from './streak.repository';
 
 const REST_STREAK_LIMIT = 5;
