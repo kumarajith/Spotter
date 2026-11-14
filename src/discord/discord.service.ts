@@ -12,7 +12,7 @@ import { ActivityService } from '../activity/activity.service';
 import { PanelService } from '../panel/panel.service';
 import { DiscordConfigService } from '../common/config/discord-config-service';
 import { addDays, todayUtc } from '../common/dates';
-import { UserStreak } from '../common/types/models';
+import { Activity, UserStreak } from '../common/types/models';
 import { StreakRepository } from '../tracking/streak.repository';
 import { TrackingRepository } from '../tracking/tracking.repository';
 import { COMMANDS } from './commands';
@@ -310,9 +310,9 @@ export class DiscordService {
     }
 
     const date = getStringOption(interaction.data.options, 'date');
-    const activityName = getStringOption(interaction.data.options, 'activity')?.toLowerCase();
+    const typedActivity = getStringOption(interaction.data.options, 'activity');
 
-    if (!date || !activityName) {
+    if (!date || !typedActivity) {
       return ephemeral('Both date and activity are required.');
     }
 
@@ -321,14 +321,27 @@ export class DiscordService {
       return ephemeral('❌ Invalid date. Use YYYY-MM-DD format and do not use a future date.');
     }
 
+    // The option is free text; autocomplete only suggests. Accept what the
+    // suggestions look like ("Rest", "😴 Rest") and nothing else, so a typo or a
+    // pasted label cannot create an activity that exists only in the logs.
+    const activity = matchActivity(
+      await this.activityService.getActivities(guildId),
+      typedActivity,
+    );
+    if (!activity) {
+      return ephemeral(
+        `❌ There is no activity called **${typedActivity.slice(0, 50)}** here. Pick one from the list that appears as you type.`,
+      );
+    }
+
     const { alreadyLogged } = await this.trackingRepository.logActivity(
       guildId,
       userId,
-      activityName,
+      activity.name,
       date,
     );
 
-    const label = activityName.charAt(0).toUpperCase() + activityName.slice(1);
+    const label = activity.displayName;
 
     if (alreadyLogged) {
       return ephemeral(`Already logged **${label}** on ${date}.`);
@@ -382,6 +395,17 @@ export class DiscordService {
     await this.activityService.removeActivity(guildId, name);
     return ephemeral(`✅ Removed **${name}**. Run \`/setup\` to refresh the panel.`);
   }
+}
+
+/** Finds an activity by its key, its display name, or the emoji-prefixed label autocomplete shows. */
+function matchActivity(activities: Activity[], typed: string): Activity | undefined {
+  const wanted = typed.trim().toLowerCase();
+  return activities.find(
+    (a) =>
+      a.name === wanted ||
+      a.displayName.toLowerCase() === wanted ||
+      `${a.emoji} ${a.displayName}`.toLowerCase() === wanted,
+  );
 }
 
 /**

@@ -339,6 +339,42 @@ describe('DiscordService', () => {
   // -----------------------------------------------------------------------
 
   describe('handleBackfill', () => {
+    beforeEach(() => {
+      activityService.getActivities.mockResolvedValue([
+        { name: 'push', displayName: 'Push', emoji: '🫸', isDefault: true },
+        { name: 'rest', displayName: 'Rest', emoji: '😴', isDefault: true },
+      ]);
+    });
+
+    it('accepts the emoji-prefixed label that autocomplete shows', async () => {
+      const interaction = makeCommandInteraction(COMMANDS.BACKFILL, [
+        stringOption('date', '2025-01-15'),
+        stringOption('activity', '😴 Rest'),
+      ]);
+
+      await service.handleCommand(interaction as any);
+
+      expect(trackingRepository.logActivity).toHaveBeenCalledWith(
+        'guild-1',
+        'user-1',
+        'rest',
+        '2025-01-15',
+      );
+    });
+
+    it('rejects an activity that is not on the panel instead of logging it', async () => {
+      const interaction = makeCommandInteraction(COMMANDS.BACKFILL, [
+        stringOption('date', '2025-01-15'),
+        stringOption('activity', 'pushh'),
+      ]);
+
+      const result = await service.handleCommand(interaction as any);
+
+      expect(trackingRepository.logActivity).not.toHaveBeenCalled();
+      expect((result.data as EphemeralData).content).toContain('no activity called **pushh**');
+      expect((result.data as EphemeralData).flags).toBe(MessageFlags.Ephemeral);
+    });
+
     it('returns error for invalid date format', async () => {
       const interaction = makeCommandInteraction(COMMANDS.BACKFILL, [
         stringOption('date', 'not-a-date'),
