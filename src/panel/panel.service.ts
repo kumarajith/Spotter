@@ -25,13 +25,13 @@ export class PanelService {
       lastPanelMessageId ??
       (await this.panelRepository.getChannel(guildId, channelId))?.lastPanelMessageId;
 
-    if (oldMessageId) {
-      try {
-        await rest.delete(Routes.channelMessage(channelId, oldMessageId));
-      } catch {
-        // Message already deleted or bot lacks access — proceed
-      }
-    }
+    // Removing the old panel and posting the new one are independent calls to
+    // Discord, several hundred milliseconds each. /setup has 3 seconds in total
+    // to answer, so the removal runs while the new panel is being posted.
+    // A failed removal (already deleted, or no access) is not a reason to stop.
+    const removingOld: Promise<unknown> = oldMessageId
+      ? rest.delete(Routes.channelMessage(channelId, oldMessageId)).catch(() => undefined)
+      : Promise.resolve();
 
     const payloads = buildPanel(activities);
     let lastMessageId: string | undefined;
@@ -42,6 +42,8 @@ export class PanelService {
       })) as { id: string };
       lastMessageId = sent.id;
     }
+
+    await removingOld;
 
     if (lastMessageId) {
       await this.panelRepository.upsertChannel(guildId, channelId, lastMessageId);

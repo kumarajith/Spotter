@@ -49,36 +49,18 @@ describe('SpotterStack', () => {
     });
   });
 
-  // 1b. DynamoDB table (pre-v4 store, kept only as the import source)
+  // 1b. DynamoDB is gone: no table, and nothing is allowed to touch one
   describe('DynamoDB', () => {
-    test('table has on-demand billing mode', () => {
-      template.hasResourceProperties('AWS::DynamoDB::Table', {
-        BillingMode: 'PAY_PER_REQUEST',
-      });
+    test('no table is created', () => {
+      template.resourceCountIs('AWS::DynamoDB::Table', 0);
     });
 
-    test('table has GSI1 with ALL projection', () => {
-      template.hasResourceProperties('AWS::DynamoDB::Table', {
-        GlobalSecondaryIndexes: Match.arrayWith([
-          Match.objectLike({
-            IndexName: 'GSI1',
-            Projection: { ProjectionType: 'ALL' },
-            KeySchema: Match.arrayWith([
-              Match.objectLike({ AttributeName: 'GSI1PK', KeyType: 'HASH' }),
-              Match.objectLike({ AttributeName: 'GSI1SK', KeyType: 'RANGE' }),
-            ]),
-          }),
-        ]),
-      });
-    });
-
-    test('table has correct key schema (PK + SK)', () => {
-      template.hasResourceProperties('AWS::DynamoDB::Table', {
-        KeySchema: Match.arrayWith([
-          Match.objectLike({ AttributeName: 'PK', KeyType: 'HASH' }),
-          Match.objectLike({ AttributeName: 'SK', KeyType: 'RANGE' }),
-        ]),
-      });
+    test('no function has a table name or any DynamoDB permission', () => {
+      const functions = template.findResources('AWS::Lambda::Function');
+      for (const fn of Object.values(functions)) {
+        expect(fn.Properties.Environment?.Variables ?? {}).not.toHaveProperty('TABLE_NAME');
+      }
+      expect(JSON.stringify(template.findResources('AWS::IAM::Policy'))).not.toContain('dynamodb:');
     });
   });
 
@@ -89,66 +71,42 @@ describe('SpotterStack', () => {
     });
   });
 
-  // 3. Lambda functions: API + Scheduler, the data-ops functions, and CDK's own providers
+  // 3. Lambda functions: API + Scheduler, the migrate function, and CDK's own providers
   describe('Lambda', () => {
-    test('application, data-ops and CDK provider functions are created', () => {
-      // 2 application + 3 data-ops + log retention provider + deploy trigger provider
-      template.resourceCountIs('AWS::Lambda::Function', 7);
+    test('application, migrate and CDK provider functions are created', () => {
+      // 2 application + migrate + log retention provider + deploy trigger provider
+      template.resourceCountIs('AWS::Lambda::Function', 5);
     });
 
-    test('migrate function exists and only knows the DSQL cluster', () => {
+    test('migrate function exists and can reach the DSQL cluster', () => {
       template.hasResourceProperties('AWS::Lambda::Function', {
         FunctionName: 'spotter-test-migrate',
         Handler: 'handlers/data-ops.migrate',
-        Environment: {
-          Variables: Match.objectLike({
-            DSQL_ENDPOINT: Match.anyValue(),
-            TABLE_NAME: Match.absent(),
-          }),
-        },
+        Environment: { Variables: Match.objectLike({ DSQL_ENDPOINT: Match.anyValue() }) },
       });
     });
 
-    test.each([
-      ['spotter-test-import-legacy', 'handlers/data-ops.importLegacy'],
-      ['spotter-test-verify', 'handlers/data-ops.verify'],
-    ])('%s reads the old table and writes to DSQL', (FunctionName, Handler) => {
-      template.hasResourceProperties('AWS::Lambda::Function', {
-        FunctionName,
-        Handler,
-        Environment: {
-          Variables: Match.objectLike({
-            DSQL_ENDPOINT: Match.anyValue(),
-            TABLE_NAME: Match.anyValue(),
-          }),
-        },
-      });
-    });
-
-    test('the app Lambdas have no access to DynamoDB', () => {
+    test('every function that talks to the database may only connect to DSQL', () => {
       const functions = template.findResources('AWS::Lambda::Function');
       const policies = template.findResources('AWS::IAM::Policy');
 
-      for (const handler of ['lambda.handler', 'handlers/scheduler.handler']) {
+      for (const handler of [
+        'lambda.handler',
+        'handlers/scheduler.handler',
+        'handlers/data-ops.migrate',
+      ]) {
         const fn = Object.values(functions).find((f) => f.Properties.Handler === handler)!;
-        expect(fn.Properties.Environment.Variables).not.toHaveProperty('TABLE_NAME');
-
         const roleId = fn.Properties.Role['Fn::GetAtt'][0];
         const attached = Object.values(policies).filter((p) =>
           JSON.stringify(p.Properties.Roles).includes(roleId),
         );
-        expect(attached.length).toBeGreaterThan(0);
-        expect(JSON.stringify(attached)).not.toContain('dynamodb:');
-        expect(JSON.stringify(attached)).toContain('dsql:DbConnectAdmin');
+        const actions = attached.flatMap((p) =>
+          p.Properties.PolicyDocument.Statement.flatMap(
+            (st: { Action: string | string[] }) => st.Action,
+          ),
+        );
+        expect(actions).toEqual(['dsql:DbConnectAdmin']);
       }
-    });
-
-    test('nothing can write to the DynamoDB table any more', () => {
-      const policies = JSON.stringify(template.findResources('AWS::IAM::Policy'));
-      for (const action of ['PutItem', 'UpdateItem', 'DeleteItem', 'BatchWriteItem']) {
-        expect(policies).not.toContain(`dynamodb:${action}`);
-      }
-      expect(policies).toContain('dynamodb:Scan');
     });
 
     test('API Lambda exists with correct handler', () => {
@@ -183,39 +141,20 @@ describe('SpotterStack', () => {
     });
   });
 
-  // 3b. Deploy ordering: migrate -> import -> app Lambdas update -> import again
-  describe('Deploy triggers', () => {
-    const logicalId = (resources: Record<string, unknown>, match: RegExp) => {
-      const ids = Object.keys(resources).filter((id) => match.test(id));
-      expect(ids).toHaveLength(1);
-      return ids[0];
-    };
-
-    test('three triggers run on deploy', () => {
-      template.resourceCountIs('Custom::Trigger', 3);
+  // 3b. Deploy ordering: migrate -> app Lambdas update
+  describe('Deploy trigger', () => {
+    test('one trigger runs on deploy', () => {
+      template.resourceCountIs('Custom::Trigger', 1);
     });
 
-    test('app Lambdas wait for the migration and the first import', () => {
-      const triggers = template.findResources('Custom::Trigger');
-      const migrate = logicalId(triggers, /MigrateOnDeploy/);
-      const importBefore = logicalId(triggers, /ImportBeforeSwitch/);
+    test('app Lambdas wait for the migration', () => {
+      const [migrate] = Object.keys(template.findResources('Custom::Trigger'));
+      expect(migrate).toMatch(/MigrateOnDeploy/);
 
       const functions = template.findResources('AWS::Lambda::Function');
       for (const handler of ['lambda.handler', 'handlers/scheduler.handler']) {
         const fn = Object.values(functions).find((f) => f.Properties.Handler === handler);
-        expect(fn?.DependsOn).toEqual(expect.arrayContaining([migrate, importBefore]));
-      }
-      expect(triggers[importBefore].DependsOn).toEqual(expect.arrayContaining([migrate]));
-    });
-
-    test('the second import waits for both app Lambdas', () => {
-      const triggers = template.findResources('Custom::Trigger');
-      const importAfter = triggers[logicalId(triggers, /ImportAfterSwitch/)];
-
-      const functions = template.findResources('AWS::Lambda::Function');
-      for (const handler of ['lambda.handler', 'handlers/scheduler.handler']) {
-        const [id] = Object.entries(functions).find(([, f]) => f.Properties.Handler === handler)!;
-        expect(importAfter.DependsOn).toEqual(expect.arrayContaining([id]));
+        expect(fn?.DependsOn).toEqual(expect.arrayContaining([migrate]));
       }
     });
   });

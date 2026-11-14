@@ -191,8 +191,7 @@ git push origin main
 │   ├── scheduler/                      # Daily task service (streak summary, panel repost)
 │   ├── handlers/
 │   │   ├── scheduler.ts                # Scheduler Lambda entry point
-│   │   └── data-ops.ts                 # migrate (every deploy) + cutover functions
-│   ├── legacy/                         # Temporary: DynamoDB import and verify
+│   │   └── data-ops.ts                 # migrate: runs on every deploy
 │   └── common/
 │       ├── config/                     # Discord credentials from env vars
 │       ├── dates.ts                    # UTC day helpers
@@ -204,16 +203,15 @@ git push origin main
 │       ├── spotter-stack.ts
 │       └── constructs/
 │           ├── api.ts                  # API Lambda + API Gateway
-│           ├── database.ts             # Aurora DSQL cluster (+ the pre-v4 DynamoDB table)
-│           ├── data-ops.ts             # Migration/cutover Lambdas + deploy-time triggers
+│           ├── database.ts             # Aurora DSQL cluster
+│           ├── data-ops.ts             # migrate Lambda + deploy-time trigger
 │           ├── scheduler.ts            # Scheduler Lambda + EventBridge Schedule
 │           ├── monitoring.ts           # CloudWatch alarms
 │           └── notifications.ts       # SNS alarm topic + email
 ├── scripts/
 │   ├── register-commands.ts            # Slash command registration
 │   ├── setup-local.ts                  # Creates/migrates the local database
-│   ├── dev-server.ts                   # Local API dev server
-│   └── verify.ts                       # Cutover check (npm run verify)
+│   └── dev-server.ts                   # Local API dev server
 ├── esbuild.config.mjs
 └── .github/workflows/
     ├── ci.yml
@@ -234,7 +232,6 @@ git push origin main
 | `npm run lint`              | ESLint with auto-fix                          |
 | `npm run test`              | Unit + database tests (in-process Postgres)   |
 | `npm run commands:register` | Register slash commands with Discord          |
-| `npm run verify -- --env dev` | Cutover check: is all of DynamoDB in DSQL?  |
 | `npm run infra:synth`       | Synthesize CloudFormation template            |
 | `npm run infra:diff:dev`    | Diff against deployed dev stack               |
 
@@ -245,14 +242,14 @@ npm test                  # App: unit tests + SQL tests against in-process Postg
 cd infra && npm test      # CDK template assertions (run `npm run build` first)
 ```
 
-105 test cases (76 app, 29 infrastructure) covering:
+92 test cases (68 app, 24 infrastructure) covering:
 
 | Area                 | What's tested                                                                          |
 | -------------------- | -------------------------------------------------------------------------------------- |
 | Streak rule          | The `streak_runs` view: gaps, rest-day limit, backfill, plus 200 random histories checked against a reference implementation |
 | Repositories         | Logs, activities (soft delete / revive), channels, migrations — on real SQL            |
 | Discord interactions | Command routing, button clicks, autocomplete, validation, error paths                  |
-| Cutover              | Import from DynamoDB (idempotent, batched), verify report                              |
+| Panel                | Posting, replacing the previous panel, failure handling                                |
 | CDK infrastructure   | DSQL cluster, deploy-trigger ordering, Lambda config, CloudWatch alarms, API Gateway   |
 
 The database tests need nothing installed. To run the same suite against a real Aurora DSQL cluster (for example the dev cluster), set `TEST_DSQL_ENDPOINT` to its endpoint and have AWS credentials available.
@@ -272,15 +269,6 @@ Primary keys are in parentheses; every query is a primary-key prefix scan, so th
 
 Schema changes go in `src/db/migrations/` and are applied automatically on every deploy, before the Lambdas receive new code. Aurora DSQL allows one DDL statement per transaction, so every migration statement must be safe to re-run (`IF NOT EXISTS`, `OR REPLACE`).
 
-### v4 cutover (temporary)
-
-v4 moved the data from DynamoDB to Aurora DSQL. The app reads and writes DSQL only; the DynamoDB table is no longer touched by it and stays, frozen, until it is removed:
-
-- Each deploy copies anything missing from DynamoDB into DSQL, before and after the Lambdas switch. The copy only inserts, so it is safe to repeat.
-- `npm run verify -- --env prod` re-runs the copy, checks that nothing DynamoDB holds is missing from DSQL, and lists users whose derived streak differs from the one stored before v4. Rows that exist only in DSQL are activity since the switch.
-- A one-time on-demand backup of the table is taken before the switch.
-- To roll back: revert the v4 merge. The old code then runs on the table as it was at the switch; anything logged after it exists only in DSQL.
-
 ---
 
 ## Roadmap
@@ -288,10 +276,10 @@ v4 moved the data from DynamoDB to Aurora DSQL. The app reads and writes DSQL on
 - [x] Core bot functionality (slash commands, activity logging, streaks)
 - [x] Daily automation (streak resets, panel reposts via EventBridge Scheduler)
 - [x] CI/CD with GitHub Actions + OIDC
-- [x] Unit tests (105 tests across app and infrastructure)
+- [x] Unit tests (92 tests across app and infrastructure)
 - [x] CloudWatch alarm alerting via SNS email
 - [x] Relational data layer on Aurora DSQL, streaks derived from logs (v4)
-- [ ] Remove the DynamoDB table and the import code once v4 is confirmed
+- [x] DynamoDB table and import code removed after the v4 cutover
 - [ ] **Observability** — structured JSON logging, correlation IDs across Lambda invocations, CloudWatch Logs Insights or Sentry integration
 - [ ] **Dashboard** — CloudWatch dashboard or Grafana for key metrics (latency, error rates, streak activity)
 

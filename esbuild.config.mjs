@@ -11,12 +11,10 @@ const result = await build({
   format: 'cjs',
   treeShaking: true,
   metafile: true,
+  // Everything the functions need is bundled, including the AWS SDK pieces that
+  // sign DSQL auth tokens, so they do not depend on which SDK version the Lambda
+  // runtime happens to ship.
   external: [
-    // Provided by the Lambda Node.js runtime. Everything else from the AWS SDK
-    // (the DSQL token signer and its credential chain) is bundled, so the
-    // functions do not depend on which SDK version the runtime happens to ship.
-    '@aws-sdk/client-dynamodb',
-    '@aws-sdk/lib-dynamodb',
     // Optional native bindings that `pg` only loads on request.
     'pg-native',
     // Local-dev/test database; reached only when PGLITE_DIR is set.
