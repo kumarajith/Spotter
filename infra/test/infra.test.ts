@@ -237,6 +237,26 @@ describe('SpotterStack', () => {
         TopicName: 'spotter-alarms-test',
       });
     });
+
+    const templateWithContext = (context: Record<string, string>) =>
+      Template.fromStack(
+        new SpotterStack(new cdk.App({ context }), 'EmailStack', {
+          environment: 'test',
+          env: { region: 'ap-south-1', account: '123456789012' },
+        }),
+      );
+
+    test('alarmEmail context subscribes that address to the topic', () => {
+      templateWithContext({ alarmEmail: 'ops@example.com' }).hasResourceProperties(
+        'AWS::SNS::Subscription',
+        { Protocol: 'email', Endpoint: 'ops@example.com' },
+      );
+    });
+
+    test('no subscription without alarmEmail, or when it is empty', () => {
+      template.resourceCountIs('AWS::SNS::Subscription', 0);
+      templateWithContext({ alarmEmail: '' }).resourceCountIs('AWS::SNS::Subscription', 0);
+    });
   });
 
   // 7. Alarms have SNS actions

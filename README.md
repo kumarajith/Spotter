@@ -157,6 +157,8 @@ aws ssm put-parameter --name "/spotter/dev/discord-application-id" --type Secure
 
 Create an IAM OIDC identity provider for `token.actions.githubusercontent.com`, then create an IAM role `GitHubActionsRole` with CDK deploy permissions and a trust policy scoped to this repository. Add the role ARN as a GitHub secret: `AWS_ROLE_ARN`.
 
+**4. Alarm emails (optional):** add a GitHub secret `ALARM_EMAIL`. The prod deploy subscribes that address to the alarm topic; AWS then sends a confirmation email, and nothing is delivered until its link is clicked. For a manual deploy, append `-- -c alarmEmail=you@example.com` to the `infra:deploy:*` command.
+
 ### Deploy
 
 ```bash
@@ -243,7 +245,7 @@ npm test                  # App: unit tests + SQL tests against in-process Postg
 cd infra && npm test      # CDK template assertions (run `npm run build` first)
 ```
 
-131 test cases (104 app, 27 infrastructure) covering:
+133 test cases (104 app, 29 infrastructure) covering:
 
 | Area                 | What's tested                                                                          |
 | -------------------- | -------------------------------------------------------------------------------------- |
@@ -286,7 +288,7 @@ v4 moved the data from DynamoDB to Aurora DSQL. Until the DynamoDB table is reti
 - [x] Core bot functionality (slash commands, activity logging, streaks)
 - [x] Daily automation (streak resets, panel reposts via EventBridge Scheduler)
 - [x] CI/CD with GitHub Actions + OIDC
-- [x] Unit tests (131 tests across app and infrastructure)
+- [x] Unit tests (133 tests across app and infrastructure)
 - [x] CloudWatch alarm alerting via SNS email
 - [x] Relational data layer on Aurora DSQL, streaks derived from logs (v4)
 - [ ] Retire the DynamoDB table and the write mirror once v4 is confirmed
