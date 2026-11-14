@@ -135,9 +135,22 @@ export class StreakService {
   async recomputeStreak(
     guildId: string,
     userId: string,
+    justLoggedEntry?: { date: string; activityName: string },
   ): Promise<{ currentStreak: number; longestStreak: number }> {
     const existing = await this.streakRepository.getStreak(guildId, userId);
     const logs = await this.streakRepository.getUserLogs(guildId, userId);
+
+    // Guard against GSI eventual consistency: the entry we just wrote to the
+    // main table may not appear in the GSI query yet.
+    if (justLoggedEntry) {
+      const alreadyPresent = logs.some(
+        (l) => l.date === justLoggedEntry.date && l.activityName === justLoggedEntry.activityName,
+      );
+      if (!alreadyPresent) {
+        logs.push(justLoggedEntry);
+        logs.sort((a, b) => (a.date > b.date ? -1 : a.date < b.date ? 1 : 0));
+      }
+    }
 
     if (logs.length === 0) {
       return { currentStreak: 0, longestStreak: existing?.longestStreak ?? 0 };

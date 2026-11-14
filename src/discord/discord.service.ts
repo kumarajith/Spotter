@@ -330,7 +330,7 @@ export class DiscordService {
     }
 
     const { currentStreak } = await withRetry(() =>
-      this.streakService.recomputeStreak(guildId, userId),
+      this.streakService.recomputeStreak(guildId, userId, { date, activityName }),
     );
 
     return {

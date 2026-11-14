@@ -396,6 +396,47 @@ describe('StreakService', () => {
       expect(saved.lastDayHasNonRest).toBe(false);
     });
 
+    it('GSI lag: injects justLoggedEntry when missing from query results', async () => {
+      // Simulate: user had 69-day streak (June 7 to today June 15 would be 9 days for test),
+      // missed yesterday (June 14), logged today (June 15) → streak 1,
+      // then backfills yesterday (June 14). GSI hasn't propagated the backfill yet.
+      const logs = [
+        { date: '2025-06-15', activityName: 'push-ups' },
+        // June 14 MISSING from GSI (just written, not propagated)
+        { date: '2025-06-13', activityName: 'push-ups' },
+        { date: '2025-06-12', activityName: 'push-ups' },
+        { date: '2025-06-11', activityName: 'push-ups' },
+      ];
+      repo.getStreak.mockResolvedValue(makeStreak({ currentStreak: 1, lastLoggedDate: '2025-06-15' }));
+      repo.getUserLogs.mockResolvedValue(logs);
+
+      const result = await service.recomputeStreak('g1', 'u1', {
+        date: '2025-06-14',
+        activityName: 'push-ups',
+      });
+
+      // With the injected entry, days 11-15 are all consecutive → streak 5
+      expect(result.currentStreak).toBe(5);
+    });
+
+    it('GSI lag: does not duplicate entry if already present in query results', async () => {
+      const logs = [
+        { date: '2025-06-15', activityName: 'push-ups' },
+        { date: '2025-06-14', activityName: 'push-ups' },
+        { date: '2025-06-13', activityName: 'push-ups' },
+      ];
+      repo.getStreak.mockResolvedValue(null);
+      repo.getUserLogs.mockResolvedValue(logs);
+
+      const result = await service.recomputeStreak('g1', 'u1', {
+        date: '2025-06-14',
+        activityName: 'push-ups',
+      });
+
+      // No duplication — still 3 consecutive days
+      expect(result.currentStreak).toBe(3);
+    });
+
     it('calls putStreak with correct computed StreakItem', async () => {
       const logs = [
         { date: '2025-06-15', activityName: 'push-ups' },

@@ -346,7 +346,10 @@ describe('DiscordService', () => {
         'push',
         '2025-01-15',
       );
-      expect(streakService.recomputeStreak).toHaveBeenCalledWith('guild-1', 'user-1');
+      expect(streakService.recomputeStreak).toHaveBeenCalledWith('guild-1', 'user-1', {
+        date: '2025-01-15',
+        activityName: 'push',
+      });
       expect(result).toEqual({
         type: InteractionResponseType.ChannelMessageWithSource,
         data: { content: expect.stringContaining('backfilled **Push**') },
