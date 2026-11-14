@@ -25,3 +25,6 @@ coverage/
 *.db
 *.db-shm
 *.db-wal
+
+# Local database (PGlite data folder)
+.pglite/

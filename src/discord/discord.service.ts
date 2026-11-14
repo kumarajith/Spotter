@@ -11,10 +11,10 @@ import {
 import { ActivityService } from '../activity/activity.service';
 import { PanelService } from '../panel/panel.service';
 import { DiscordConfigService } from '../common/config/discord-config-service';
-import { StreakService } from '../tracking/streak.service';
+import { addDays, todayUtc } from '../common/dates';
+import { Activity, UserStreak } from '../common/types/models';
 import { StreakRepository } from '../tracking/streak.repository';
 import { TrackingRepository } from '../tracking/tracking.repository';
-import { withRetry } from '../common/retry';
 import { COMMANDS } from './commands';
 import { autocompleteResult, embedResponse, ephemeral, getStringOption } from './discord.utils';
 
@@ -26,7 +26,6 @@ export class DiscordService {
     private readonly activityService: ActivityService,
     private readonly panelService: PanelService,
     private readonly discordConfig: DiscordConfigService,
-    private readonly streakService: StreakService,
     private readonly streakRepository: StreakRepository,
     private readonly trackingRepository: TrackingRepository,
   ) {}
@@ -73,8 +72,9 @@ export class DiscordService {
     try {
       await this.panelService.setup(guildId, channelId);
       return ephemeral('✅ Tracker panel posted! This channel will get daily reposts.');
-    } catch {
-      return ephemeral('❌ Failed to post the tracker panel. Please try again.');
+    } catch (err) {
+      console.error(`[setup] failed for guild ${guildId}, channel ${channelId}:`, err);
+      return ephemeral(setupFailureMessage(err));
     }
   }
 
@@ -139,9 +139,12 @@ export class DiscordService {
       return ephemeral('Invalid activity.');
     }
 
-    const date = new Date().toISOString().slice(0, 10);
-    const { alreadyLogged } = await withRetry(() =>
-      this.trackingRepository.logActivity(guildId, userId, activityName, date),
+    const today = todayUtc();
+    const { alreadyLogged } = await this.trackingRepository.logActivity(
+      guildId,
+      userId,
+      activityName,
+      today,
     );
 
     const label = activityName.charAt(0).toUpperCase() + activityName.slice(1);
@@ -150,9 +153,7 @@ export class DiscordService {
       return ephemeral(`Already logged **${label}** today!`);
     }
 
-    const { currentStreak } = await withRetry(() =>
-      this.streakService.processActivityLogged(guildId, userId, activityName, date),
-    );
+    const { currentStreak } = await this.streakRepository.getUserStreak(guildId, userId, today);
 
     return {
       type: InteractionResponseType.ChannelMessageWithSource,
@@ -172,21 +173,21 @@ export class DiscordService {
     }
     const targetUserId = getStringOption(interaction.data.options, 'user') ?? selfId;
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayUtc();
     const thirtyDaysAgo = addDays(today, -29); // inclusive: today + 29 prior days = 30 days
 
-    const [streakItem, rangeLogs, activityCounts] = await Promise.all([
-      this.streakRepository.getStreak(guildId, targetUserId),
+    const [streak, rangeLogs, activityCounts] = await Promise.all([
+      this.streakRepository.getUserStreak(guildId, targetUserId, today),
       this.trackingRepository.getUserLogsForRange(guildId, targetUserId, thirtyDaysAgo, today),
       this.trackingRepository.getUserActivityCounts(guildId, targetUserId),
     ]);
 
-    if (!streakItem && rangeLogs.length === 0 && activityCounts.size === 0) {
+    if (streak.bestStreak === 0 && activityCounts.size === 0) {
       return ephemeral('No activity logged yet. Hit the buttons to start your streak!');
     }
 
-    const currentStreak = streakItem?.currentStreak ?? 0;
-    const longestStreak = streakItem?.longestStreak ?? 0;
+    const currentStreak = streak.currentStreak;
+    const longestStreak = streak.bestStreak;
 
     // Build heatmap grid: oldest → newest, rows of 10
     const logsByDate = new Map<string, { hasNonRest: boolean }>();
@@ -256,21 +257,22 @@ export class DiscordService {
   }
 
   private async handleLeaderboard(guildId: string) {
-    const [currentTop, allStreaks] = await Promise.all([
-      this.streakRepository.getTopCurrentStreaks(guildId),
-      this.streakRepository.getAllGuildStreaks(guildId),
-    ]);
+    const allStreaks = await this.streakRepository.getGuildStreaks(guildId, todayUtc());
 
-    const allTimeTop = allStreaks
-      .filter((s) => s.longestStreak > 0)
-      .sort((a, b) => b.longestStreak - a.longestStreak)
-      .slice(0, 10);
+    const top10 = (by: (s: UserStreak) => number) =>
+      allStreaks
+        .filter((s) => by(s) > 0)
+        .sort((a, b) => by(b) - by(a) || a.userId.localeCompare(b.userId))
+        .slice(0, 10);
+
+    const currentTop = top10((s) => s.currentStreak);
+    const allTimeTop = top10((s) => s.bestStreak);
 
     if (currentTop.length === 0 && allTimeTop.length === 0) {
       return ephemeral('No streaks recorded yet. Start logging to get on the board!');
     }
 
-    const formatCurrent = (items: typeof currentTop) =>
+    const formatCurrent = (items: UserStreak[]) =>
       items
         .map(
           (s, i) =>
@@ -278,11 +280,11 @@ export class DiscordService {
         )
         .join('\n') || '—';
 
-    const formatAllTime = (items: typeof allTimeTop) =>
+    const formatAllTime = (items: UserStreak[]) =>
       items
         .map(
           (s, i) =>
-            `${i + 1}. <@${s.userId}> — ${s.longestStreak} day${s.longestStreak === 1 ? '' : 's'}`,
+            `${i + 1}. <@${s.userId}> — ${s.bestStreak} day${s.bestStreak === 1 ? '' : 's'}`,
         )
         .join('\n') || '—';
 
@@ -308,30 +310,44 @@ export class DiscordService {
     }
 
     const date = getStringOption(interaction.data.options, 'date');
-    const activityName = getStringOption(interaction.data.options, 'activity')?.toLowerCase();
+    const typedActivity = getStringOption(interaction.data.options, 'activity');
 
-    if (!date || !activityName) {
+    if (!date || !typedActivity) {
       return ephemeral('Both date and activity are required.');
     }
 
-    const today = new Date().toISOString().slice(0, 10);
-    if (!DATE_RE.test(date) || date > today) {
+    const today = todayUtc();
+    if (!isRealDate(date) || date > today) {
       return ephemeral('❌ Invalid date. Use YYYY-MM-DD format and do not use a future date.');
     }
 
-    const { alreadyLogged } = await withRetry(() =>
-      this.trackingRepository.logActivity(guildId, userId, activityName, date),
+    // The option is free text; autocomplete only suggests. Accept what the
+    // suggestions look like ("Rest", "😴 Rest") and nothing else, so a typo or a
+    // pasted label cannot create an activity that exists only in the logs.
+    const activity = matchActivity(
+      await this.activityService.getActivities(guildId),
+      typedActivity,
+    );
+    if (!activity) {
+      return ephemeral(
+        `❌ There is no activity called **${typedActivity.slice(0, 50)}** here. Pick one from the list that appears as you type.`,
+      );
+    }
+
+    const { alreadyLogged } = await this.trackingRepository.logActivity(
+      guildId,
+      userId,
+      activity.name,
+      date,
     );
 
-    const label = activityName.charAt(0).toUpperCase() + activityName.slice(1);
+    const label = activity.displayName;
 
     if (alreadyLogged) {
       return ephemeral(`Already logged **${label}** on ${date}.`);
     }
 
-    const { currentStreak } = await withRetry(() =>
-      this.streakService.recomputeStreak(guildId, userId),
-    );
+    const { currentStreak } = await this.streakRepository.getUserStreak(guildId, userId, today);
 
     return {
       type: InteractionResponseType.ChannelMessageWithSource,
@@ -381,8 +397,41 @@ export class DiscordService {
   }
 }
 
-function addDays(dateStr: string, days: number): string {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
+/** Finds an activity by its key, its display name, or the emoji-prefixed label autocomplete shows. */
+function matchActivity(activities: Activity[], typed: string): Activity | undefined {
+  const wanted = typed.trim().toLowerCase();
+  return activities.find(
+    (a) =>
+      a.name === wanted ||
+      a.displayName.toLowerCase() === wanted ||
+      `${a.emoji} ${a.displayName}`.toLowerCase() === wanted,
+  );
+}
+
+/**
+ * Posting the panel is a REST call made as the bot, so it fails when the bot
+ * is not a member of the server or lacks permissions in the channel
+ * (Discord: 403, code 50001 "Missing Access" / 50013 "Missing Permissions").
+ * That is something the person running /setup can fix, so say so.
+ */
+function setupFailureMessage(err: unknown): string {
+  const { status, code } = (err ?? {}) as { status?: number; code?: number | string };
+  if (status === 403 || code === 50001 || code === 50013) {
+    return (
+      "❌ I can't post in this channel. Make sure the bot has been added to this server " +
+      'and can **View Channel**, **Send Messages** and **Embed Links** here, then run `/setup` again.'
+    );
+  }
+  return '❌ Failed to post the tracker panel. Please try again.';
+}
+
+/**
+ * True for a YYYY-MM-DD string that names a day that exists. The database
+ * column is a real `date`, so "2025-02-31" has to be turned away here rather
+ * than surface as a query error.
+ */
+function isRealDate(value: string): boolean {
+  if (!DATE_RE.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }

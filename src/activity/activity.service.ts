@@ -1,5 +1,5 @@
 import { ActivityRepository } from './activity.repository';
-import { ActivityItem } from '../common/types/dynamo.types';
+import { Activity } from '../common/types/models';
 
 export class ActivityService {
   constructor(private readonly activityRepo: ActivityRepository) {}
@@ -9,7 +9,7 @@ export class ActivityService {
     return regex.test(displayName);
   }
 
-  async getActivities(guildId: string): Promise<ActivityItem[]> {
+  async getActivities(guildId: string): Promise<Activity[]> {
     return this.activityRepo.getActivities(guildId);
   }
 
@@ -22,7 +22,10 @@ export class ActivityService {
     if (!this.validateActivityName(displayName)) {
       throw new Error('Activity name must be alphanumeric (spaces allowed), max 32 characters.');
     }
-    await this.activityRepo.putActivity(guildId, displayName, emoji, false, userId);
+    const created = await this.activityRepo.putActivity(guildId, displayName, emoji, false, userId);
+    if (!created) {
+      throw new Error(`An activity named "${displayName}" already exists.`);
+    }
   }
 
   async removeActivity(guildId: string, name: string): Promise<void> {

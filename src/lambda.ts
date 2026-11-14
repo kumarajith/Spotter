@@ -2,12 +2,11 @@ import { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import { verifyKey } from 'discord-interactions';
 import { APIInteraction, InteractionType, InteractionResponseType } from 'discord-api-types/v10';
 import { DiscordConfigService } from './common/config/discord-config-service';
-import { DynamoService } from './common/dynamodb/dynamodb.service';
+import { createDb } from './db/db';
 import { ActivityRepository } from './activity/activity.repository';
 import { ActivityService } from './activity/activity.service';
-import { TrackingRepository } from './tracking/tracking.repository';
 import { StreakRepository } from './tracking/streak.repository';
-import { StreakService } from './tracking/streak.service';
+import { TrackingRepository } from './tracking/tracking.repository';
 import { PanelRepository } from './panel/panel.repository';
 import { PanelService } from './panel/panel.service';
 import { DiscordService } from './discord/discord.service';
@@ -20,25 +19,17 @@ function init(): DiscordService {
   if (discordService) return discordService;
 
   const discordConfig = new DiscordConfigService();
-  const dynamo = new DynamoService();
+  const db = createDb();
 
-  const activityRepository = new ActivityRepository(dynamo);
-  const activityService = new ActivityService(activityRepository);
-
-  const trackingRepository = new TrackingRepository(dynamo);
-  const streakRepository = new StreakRepository(dynamo);
-  const streakService = new StreakService(streakRepository);
-
-  const panelRepository = new PanelRepository(dynamo);
-  const panelService = new PanelService(activityService, panelRepository, discordConfig);
+  const activityService = new ActivityService(new ActivityRepository(db));
+  const panelService = new PanelService(activityService, new PanelRepository(db), discordConfig);
 
   discordService = new DiscordService(
     activityService,
     panelService,
     discordConfig,
-    streakService,
-    streakRepository,
-    trackingRepository,
+    new StreakRepository(db),
+    new TrackingRepository(db),
   );
 
   return discordService;

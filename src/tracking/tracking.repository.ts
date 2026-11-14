@@ -1,79 +1,51 @@
-import { DynamoService } from '../common/dynamodb/dynamodb.service';
-import { ActivityLogItem } from '../common/types/dynamo.types';
+import { ActivityLog } from '../common/types/models';
+import { Db } from '../db/db';
 
 export class TrackingRepository {
-  constructor(private readonly dynamo: DynamoService) {}
+  constructor(protected readonly db: Db) {}
 
-  async getUserLogsForRange(
-    guildId: string,
-    userId: string,
-    startDate: string,
-    endDate: string,
-  ): Promise<Array<{ date: string; activityName: string }>> {
-    const result = await this.dynamo.query({
-      IndexName: 'GSI1',
-      KeyConditionExpression: 'GSI1PK = :pk AND GSI1SK BETWEEN :start AND :end',
-      ExpressionAttributeValues: {
-        ':pk': `USER#${userId}`,
-        ':start': `LOG#${guildId}#${startDate}`,
-        ':end': `LOG#${guildId}#${endDate}`,
-      },
-      ScanIndexForward: false,
-    });
-
-    return (result.Items ?? []).map((item) => ({
-      date: item['date'] as string,
-      activityName: item['activityName'] as string,
-    }));
-  }
-
-  async getUserActivityCounts(guildId: string, userId: string): Promise<Map<string, number>> {
-    const result = await this.dynamo.query({
-      IndexName: 'GSI1',
-      KeyConditionExpression: 'GSI1PK = :pk AND begins_with(GSI1SK, :skPrefix)',
-      ExpressionAttributeValues: {
-        ':pk': `USER#${userId}`,
-        ':skPrefix': `LOG#${guildId}#`,
-      },
-    });
-
-    const counts = new Map<string, number>();
-    for (const item of result.Items ?? []) {
-      const name = item['activityName'] as string;
-      counts.set(name, (counts.get(name) ?? 0) + 1);
-    }
-    return counts;
-  }
-
+  /** Idempotent: logging the same activity twice on one day reports `alreadyLogged`. */
   async logActivity(
     guildId: string,
     userId: string,
     activityName: string,
     date: string,
   ): Promise<{ alreadyLogged: boolean }> {
-    const item: ActivityLogItem = {
-      PK: `GUILD#${guildId}`,
-      SK: `LOG#${date}#${userId}#${activityName}`,
-      GSI1PK: `USER#${userId}`,
-      GSI1SK: `LOG#${guildId}#${date}`,
-      guildId,
-      userId,
-      activityName,
-      date,
-      loggedAt: new Date().toISOString(),
-      entityType: 'LOG',
-    };
+    const inserted = await this.db.query(
+      `INSERT INTO activity_logs (guild_id, user_id, log_date, activity_name)
+       VALUES ($1, $2, $3::date, $4)
+       ON CONFLICT DO NOTHING
+       RETURNING activity_name`,
+      [guildId, userId, date, activityName],
+    );
+    return { alreadyLogged: inserted.length === 0 };
+  }
 
-    try {
-      await this.dynamo.put(item as unknown as Record<string, unknown>, {
-        ConditionExpression: 'attribute_not_exists(SK)',
-      });
-      return { alreadyLogged: false };
-    } catch (err: unknown) {
-      if ((err as { name?: string }).name === 'ConditionalCheckFailedException') {
-        return { alreadyLogged: true };
-      }
-      throw err;
-    }
+  /** Logs between two dates (inclusive), newest first. */
+  async getUserLogsForRange(
+    guildId: string,
+    userId: string,
+    startDate: string,
+    endDate: string,
+  ): Promise<ActivityLog[]> {
+    const rows = await this.db.query<{ date: string; activity_name: string }>(
+      `SELECT CAST(log_date AS text) AS date, activity_name
+       FROM activity_logs
+       WHERE guild_id = $1 AND user_id = $2 AND log_date BETWEEN $3::date AND $4::date
+       ORDER BY log_date DESC, activity_name`,
+      [guildId, userId, startDate, endDate],
+    );
+    return rows.map((r) => ({ date: r.date, activityName: r.activity_name }));
+  }
+
+  async getUserActivityCounts(guildId: string, userId: string): Promise<Map<string, number>> {
+    const rows = await this.db.query<{ activity_name: string; count: number }>(
+      `SELECT activity_name, CAST(COUNT(*) AS integer) AS count
+       FROM activity_logs
+       WHERE guild_id = $1 AND user_id = $2
+       GROUP BY activity_name`,
+      [guildId, userId],
+    );
+    return new Map(rows.map((r) => [r.activity_name, r.count]));
   }
 }

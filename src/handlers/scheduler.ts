@@ -1,6 +1,6 @@
 import { ScheduledHandler } from 'aws-lambda';
 import { DiscordConfigService } from '../common/config/discord-config-service';
-import { DynamoService } from '../common/dynamodb/dynamodb.service';
+import { createDb } from '../db/db';
 import { ActivityRepository } from '../activity/activity.repository';
 import { ActivityService } from '../activity/activity.service';
 import { PanelRepository } from '../panel/panel.repository';
@@ -14,20 +14,16 @@ function init(): SchedulerService {
   if (schedulerService) return schedulerService;
 
   const discordConfig = new DiscordConfigService();
-  const dynamo = new DynamoService();
+  const db = createDb();
 
-  const activityRepository = new ActivityRepository(dynamo);
-  const activityService = new ActivityService(activityRepository);
-
-  const panelRepository = new PanelRepository(dynamo);
+  const activityService = new ActivityService(new ActivityRepository(db));
+  const panelRepository = new PanelRepository(db);
   const panelService = new PanelService(activityService, panelRepository, discordConfig);
-
-  const streakRepository = new StreakRepository(dynamo);
 
   schedulerService = new SchedulerService(
     panelRepository,
     panelService,
-    streakRepository,
+    new StreakRepository(db),
     discordConfig,
   );
 

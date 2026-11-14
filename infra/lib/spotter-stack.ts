@@ -4,6 +4,7 @@ import { Construct } from 'constructs';
 import { DatabaseConstruct } from './constructs/database';
 import { ApiConstruct } from './constructs/api';
 import { SchedulerConstruct } from './constructs/scheduler';
+import { DataOpsConstruct } from './constructs/data-ops';
 import { MonitoringConstruct } from './constructs/monitoring';
 import { NotificationsConstruct } from './constructs/notifications';
 
@@ -42,7 +43,6 @@ export class SpotterStack extends cdk.Stack {
     });
 
     const api = new ApiConstruct(this, 'Api', {
-      table: db.table,
       discordBotToken,
       discordPublicKey,
       discordApplicationId,
@@ -50,11 +50,19 @@ export class SpotterStack extends cdk.Stack {
     });
 
     const scheduler = new SchedulerConstruct(this, 'Scheduler', {
-      table: db.table,
       discordBotToken,
       discordPublicKey,
       discordApplicationId,
       environment: props.environment,
+    });
+
+    db.grantConnect(api.apiLambda);
+    db.grantConnect(scheduler.schedulerLambda);
+
+    new DataOpsConstruct(this, 'DataOps', {
+      environment: props.environment,
+      database: db,
+      appFunctions: [api.apiLambda, scheduler.schedulerLambda],
     });
 
     const alarmEmail = String(this.node.tryGetContext('alarmEmail') ?? '');
@@ -74,9 +82,14 @@ export class SpotterStack extends cdk.Stack {
       description: 'HTTP API endpoint URL',
     });
 
+    new cdk.CfnOutput(this, 'DsqlEndpoint', {
+      value: db.endpoint,
+      description: 'Aurora DSQL cluster endpoint',
+    });
+
     new cdk.CfnOutput(this, 'TableName', {
       value: db.table.tableName,
-      description: 'DynamoDB table name',
+      description: 'DynamoDB table name (pre-v4 store, read-only source for the import)',
     });
   }
 }

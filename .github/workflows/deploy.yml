@@ -70,5 +70,9 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ap-south-1
 
+      # ALARM_EMAIL (repository secret) subscribes that address to the alarm topic.
+      # Left unset, the stack deploys without a subscription, as before.
       - name: Deploy prod stack
-        run: cd infra && npx cdk deploy Spotter-prod --require-approval never -c env=prod
+        env:
+          ALARM_EMAIL: ${{ secrets.ALARM_EMAIL }}
+        run: cd infra && npx cdk deploy Spotter-prod --require-approval never -c env=prod -c "alarmEmail=$ALARM_EMAIL"
