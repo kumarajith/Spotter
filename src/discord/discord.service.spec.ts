@@ -212,6 +212,46 @@ describe('DiscordService', () => {
       expect((result.data as EphemeralData).flags).toBe(MessageFlags.Ephemeral);
     });
 
+    describe('when posting the panel fails', () => {
+      let logged: jest.SpyInstance;
+
+      beforeEach(() => {
+        logged = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      });
+
+      afterEach(() => {
+        logged.mockRestore();
+      });
+
+      it('explains a permissions problem and logs the Discord error', async () => {
+        const missingAccess = Object.assign(new Error('Missing Access'), {
+          status: 403,
+          code: 50001,
+        });
+        panelService.setup.mockRejectedValueOnce(missingAccess);
+
+        const result = await service.handleCommand(makeCommandInteraction(COMMANDS.SETUP) as any);
+
+        expect((result.data as EphemeralData).content).toContain("I can't post in this channel");
+        expect((result.data as EphemeralData).flags).toBe(MessageFlags.Ephemeral);
+        expect(logged).toHaveBeenCalledWith(
+          expect.stringContaining('guild guild-1, channel channel-1'),
+          missingAccess,
+        );
+      });
+
+      it('keeps the generic message for anything else, and still logs it', async () => {
+        panelService.setup.mockRejectedValueOnce(new Error('socket hang up'));
+
+        const result = await service.handleCommand(makeCommandInteraction(COMMANDS.SETUP) as any);
+
+        expect((result.data as EphemeralData).content).toContain(
+          'Failed to post the tracker panel',
+        );
+        expect(logged).toHaveBeenCalledTimes(1);
+      });
+    });
+
     it('returns error when channel is missing', async () => {
       const interaction = makeCommandInteraction(COMMANDS.SETUP, [], {
         channel: undefined,

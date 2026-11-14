@@ -72,8 +72,9 @@ export class DiscordService {
     try {
       await this.panelService.setup(guildId, channelId);
       return ephemeral('✅ Tracker panel posted! This channel will get daily reposts.');
-    } catch {
-      return ephemeral('❌ Failed to post the tracker panel. Please try again.');
+    } catch (err) {
+      console.error(`[setup] failed for guild ${guildId}, channel ${channelId}:`, err);
+      return ephemeral(setupFailureMessage(err));
     }
   }
 
@@ -381,6 +382,23 @@ export class DiscordService {
     await this.activityService.removeActivity(guildId, name);
     return ephemeral(`✅ Removed **${name}**. Run \`/setup\` to refresh the panel.`);
   }
+}
+
+/**
+ * Posting the panel is a REST call made as the bot, so it fails when the bot
+ * is not a member of the server or lacks permissions in the channel
+ * (Discord: 403, code 50001 "Missing Access" / 50013 "Missing Permissions").
+ * That is something the person running /setup can fix, so say so.
+ */
+function setupFailureMessage(err: unknown): string {
+  const { status, code } = (err ?? {}) as { status?: number; code?: number | string };
+  if (status === 403 || code === 50001 || code === 50013) {
+    return (
+      "❌ I can't post in this channel. Make sure the bot has been added to this server " +
+      'and can **View Channel**, **Send Messages** and **Embed Links** here, then run `/setup` again.'
+    );
+  }
+  return '❌ Failed to post the tracker panel. Please try again.';
 }
 
 /**
