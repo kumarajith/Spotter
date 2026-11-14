@@ -70,12 +70,13 @@ describe('DynamoDB mirror', () => {
   });
 
   describe('activities', () => {
-    const dynamo = { putActivity: jest.fn(), deleteActivity: jest.fn() };
+    const dynamo = { putActivity: jest.fn(), deleteActivity: jest.fn(), seedDefaults: jest.fn() };
     let activities: MirroredActivityRepository;
 
     beforeEach(() => {
       dynamo.putActivity.mockReset().mockResolvedValue(undefined);
       dynamo.deleteActivity.mockReset().mockResolvedValue(undefined);
+      dynamo.seedDefaults.mockReset().mockResolvedValue(undefined);
       activities = new MirroredActivityRepository(db, dynamo as any);
     });
 
@@ -113,7 +114,25 @@ describe('DynamoDB mirror', () => {
       await activities.seedDefaults(guildId);
 
       expect(await activities.getActivities(guildId)).toHaveLength(DEFAULT_ACTIVITIES.length);
-      expect(dynamo.putActivity).toHaveBeenCalledTimes(DEFAULT_ACTIVITIES.length);
+      expect(dynamo.seedDefaults).toHaveBeenCalledWith(guildId);
+    });
+
+    it('seeding again adds nothing, and restores a removed default in both stores', async () => {
+      await activities.seedDefaults(guildId);
+      await activities.deleteActivity(guildId, 'Walk');
+      dynamo.putActivity.mockClear();
+
+      await activities.seedDefaults(guildId);
+
+      expect(await activities.getActivities(guildId)).toHaveLength(DEFAULT_ACTIVITIES.length);
+      expect(dynamo.putActivity).toHaveBeenCalledTimes(1);
+      expect(dynamo.putActivity).toHaveBeenCalledWith(
+        guildId,
+        'Walk',
+        expect.any(String),
+        true,
+        'system',
+      );
     });
   });
 

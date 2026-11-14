@@ -64,6 +64,12 @@ export class MirroredActivityRepository extends ActivityRepository {
     await super.deleteActivity(guildId, displayName);
     await this.dynamo.deleteActivity(guildId, displayName);
   }
+
+  async seedDefaults(guildId: string): Promise<void> {
+    await super.seedDefaults(guildId);
+    // The DynamoDB side adds whichever defaults are missing, in parallel.
+    await this.dynamo.seedDefaults(guildId);
+  }
 }
 
 export class MirroredPanelRepository extends PanelRepository {

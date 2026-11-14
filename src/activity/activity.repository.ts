@@ -72,8 +72,30 @@ export class ActivityRepository {
     );
   }
 
+  /**
+   * Makes sure every default activity is on the panel. Runs on each /setup,
+   * which has to answer Discord within 3 seconds, so the usual case is two
+   * statements: one insert for whatever is missing, one look for removed defaults.
+   */
   async seedDefaults(guildId: string): Promise<void> {
-    for (const activity of DEFAULT_ACTIVITIES) {
+    const tuples = DEFAULT_ACTIVITIES.map(
+      (_, i) => `($1, $${i * 3 + 2}, $${i * 3 + 3}, $${i * 3 + 4}, true, 'system')`,
+    );
+    await this.db.query(
+      `INSERT INTO activities (guild_id, name, display_name, emoji, is_default, created_by)
+       VALUES ${tuples.join(', ')}
+       ON CONFLICT DO NOTHING`,
+      [guildId, ...DEFAULT_ACTIVITIES.flatMap((a) => [a.name, a.displayName, a.emoji])],
+    );
+
+    const removed = await this.db.query<{ name: string }>(
+      `SELECT name FROM activities
+       WHERE guild_id = $1 AND removed_at IS NOT NULL
+         AND name IN (${DEFAULT_ACTIVITIES.map((_, i) => `$${i + 2}`).join(', ')})`,
+      [guildId, ...DEFAULT_ACTIVITIES.map((a) => a.name)],
+    );
+    for (const { name } of removed) {
+      const activity = DEFAULT_ACTIVITIES.find((a) => a.name === name)!;
       await this.putActivity(guildId, activity.displayName, activity.emoji, true, 'system');
     }
   }
