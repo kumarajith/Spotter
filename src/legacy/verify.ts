@@ -7,23 +7,29 @@ import { ImportSummary, importLegacyData, scanLegacyTable } from './import-dynam
 /**
  * Temporary, for the v4 cutover: the on-demand sanity check.
  *
+ * The app stops writing to DynamoDB at the switch, so the table is a frozen
+ * record of everything up to that moment. The question is therefore
+ * one-directional: is everything DynamoDB holds also in SQL?
+ *
  *  1. Re-runs the copy (DynamoDB -> SQL), so nothing written around the switch is missed.
- *  2. Compares logs, activities and channels row by row between the two stores.
+ *  2. Lists anything in DynamoDB that is still not in SQL — there should be nothing.
+ *     Rows that exist only in SQL are activity since the switch, and are just counted.
  *  3. Puts each user's streak as stored in DynamoDB next to the one now derived
- *     from the logs. The stored rows stop being updated at the switch, so this
- *     part is only meaningful shortly after it.
+ *     from the logs. The stored rows are as of the switch, so this is only
+ *     meaningful shortly after it.
  */
 
 const MAX_LISTED = 50;
 
-export interface RowDifference {
+export interface RowCheck {
   dynamo: number;
   sql: number;
-  onlyInDynamoCount: number;
-  onlyInSqlCount: number;
-  /** First 50 of each, as "guild | ..." keys. */
-  onlyInDynamo: string[];
-  onlyInSql: string[];
+  /** In DynamoDB but not in SQL. Should be 0. */
+  missingFromSqlCount: number;
+  /** First 50 of those, as "guild | ..." keys. */
+  missingFromSql: string[];
+  /** In SQL but not in DynamoDB: written since the switch. Expected to grow. */
+  newInSqlCount: number;
 }
 
 export interface StreakDifference {
@@ -34,26 +40,24 @@ export interface StreakDifference {
 }
 
 export interface VerifyReport {
-  /** True when logs, activities and channels are identical in both stores. */
+  /** True when nothing that DynamoDB holds is missing from SQL. */
   ok: boolean;
   today: string;
   copy: ImportSummary;
-  rows: { logs: RowDifference; activities: RowDifference; channels: RowDifference };
+  rows: { logs: RowCheck; activities: RowCheck; channels: RowCheck };
   streaks: { compared: number; differences: StreakDifference[] };
 }
 
-function compare(dynamoKeys: string[], sqlKeys: string[]): RowDifference {
+function check(dynamoKeys: string[], sqlKeys: string[]): RowCheck {
   const inDynamo = new Set(dynamoKeys);
   const inSql = new Set(sqlKeys);
-  const onlyInDynamo = [...inDynamo].filter((k) => !inSql.has(k)).sort();
-  const onlyInSql = [...inSql].filter((k) => !inDynamo.has(k)).sort();
+  const missingFromSql = [...inDynamo].filter((k) => !inSql.has(k)).sort();
   return {
     dynamo: inDynamo.size,
     sql: inSql.size,
-    onlyInDynamoCount: onlyInDynamo.length,
-    onlyInSqlCount: onlyInSql.length,
-    onlyInDynamo: onlyInDynamo.slice(0, MAX_LISTED),
-    onlyInSql: onlyInSql.slice(0, MAX_LISTED),
+    missingFromSqlCount: missingFromSql.length,
+    missingFromSql: missingFromSql.slice(0, MAX_LISTED),
+    newInSqlCount: [...inSql].filter((k) => !inDynamo.has(k)).length,
   };
 }
 
@@ -70,25 +74,26 @@ export async function verifyAgainstLegacy(
               AS key
      FROM activity_logs`,
   );
+  // Activities removed since the switch still count as present (they are soft-deleted),
+  // and a channel is the same channel whichever panel message it currently points at.
   const sqlActivities = await db.query<{ key: string }>(
-    `SELECT guild_id || ' | ' || name AS key FROM activities WHERE removed_at IS NULL`,
+    `SELECT guild_id || ' | ' || name AS key FROM activities`,
   );
   const sqlChannels = await db.query<{ key: string }>(
-    `SELECT guild_id || ' | ' || channel_id || ' | ' || COALESCE(last_panel_message_id, '') AS key
-     FROM tracked_channels`,
+    `SELECT guild_id || ' | ' || channel_id AS key FROM tracked_channels`,
   );
 
   const rows = {
-    logs: compare(
+    logs: check(
       legacy.logs.map((l) => `${l.guildId} | ${l.userId} | ${l.date} | ${l.activityName}`),
       sqlLogs.map((r) => r.key),
     ),
-    activities: compare(
+    activities: check(
       legacy.activities.map((a) => `${a.guildId} | ${a.name}`),
       sqlActivities.map((r) => r.key),
     ),
-    channels: compare(
-      legacy.channels.map((c) => `${c.guildId} | ${c.channelId} | ${c.lastPanelMessageId ?? ''}`),
+    channels: check(
+      legacy.channels.map((c) => `${c.guildId} | ${c.channelId}`),
       sqlChannels.map((r) => r.key),
     ),
   };
@@ -118,12 +123,11 @@ export async function verifyAgainstLegacy(
     }
   }
 
-  const identical = (d: RowDifference) => d.onlyInDynamoCount === 0 && d.onlyInSqlCount === 0;
   return {
     ok:
-      identical(rows.logs) &&
-      identical(rows.activities) &&
-      identical(rows.channels) &&
+      rows.logs.missingFromSqlCount === 0 &&
+      rows.activities.missingFromSqlCount === 0 &&
+      rows.channels.missingFromSqlCount === 0 &&
       copy.unrecognised.length === 0,
     today,
     copy,

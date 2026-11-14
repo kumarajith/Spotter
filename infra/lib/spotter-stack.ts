@@ -43,7 +43,6 @@ export class SpotterStack extends cdk.Stack {
     });
 
     const api = new ApiConstruct(this, 'Api', {
-      table: db.table,
       discordBotToken,
       discordPublicKey,
       discordApplicationId,
@@ -51,7 +50,6 @@ export class SpotterStack extends cdk.Stack {
     });
 
     const scheduler = new SchedulerConstruct(this, 'Scheduler', {
-      table: db.table,
       discordBotToken,
       discordPublicKey,
       discordApplicationId,
@@ -91,7 +89,7 @@ export class SpotterStack extends cdk.Stack {
 
     new cdk.CfnOutput(this, 'TableName', {
       value: db.table.tableName,
-      description: 'DynamoDB table name (pre-v4 store, mirrored until retired)',
+      description: 'DynamoDB table name (pre-v4 store, read-only source for the import)',
     });
   }
 }

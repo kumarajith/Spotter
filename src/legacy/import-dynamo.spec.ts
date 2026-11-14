@@ -200,7 +200,7 @@ describeLocal('DynamoDB -> SQL import and verify', () => {
   });
 
   describe('verifyAgainstLegacy', () => {
-    it('copies what is missing, then reports both stores as identical', async () => {
+    it('copies what is missing, then reports that nothing in DynamoDB is missing from SQL', async () => {
       const table = fakeTable([
         ...lastThreeDays,
         activity('Push', '🫸'),
@@ -212,13 +212,14 @@ describeLocal('DynamoDB -> SQL import and verify', () => {
 
       expect(report.ok).toBe(true);
       expect(report.copy.inserted.logs).toBe(4);
-      expect(report.rows.logs).toMatchObject({ dynamo: 4, sql: 4 });
-      expect(report.rows.activities).toMatchObject({ dynamo: 1, sql: 1 });
-      expect(report.rows.channels).toMatchObject({ dynamo: 1, sql: 1 });
+      const nothingMissing = { missingFromSqlCount: 0, missingFromSql: [], newInSqlCount: 0 };
+      expect(report.rows.logs).toEqual({ dynamo: 4, sql: 4, ...nothingMissing });
+      expect(report.rows.activities).toEqual({ dynamo: 1, sql: 1, ...nothingMissing });
+      expect(report.rows.channels).toEqual({ dynamo: 1, sql: 1, ...nothingMissing });
       expect(report.streaks).toEqual({ compared: 1, differences: [] });
     });
 
-    it('flags rows that exist only in SQL (a mirror write that never happened)', async () => {
+    it('counts rows written since the switch without treating them as a problem', async () => {
       await db.query(
         `INSERT INTO activity_logs (guild_id, user_id, log_date, activity_name)
          VALUES ($1, 'u9', $2::date, 'push')`,
@@ -227,9 +228,13 @@ describeLocal('DynamoDB -> SQL import and verify', () => {
 
       const report = await verifyAgainstLegacy(db, fakeTable(lastThreeDays), TODAY);
 
-      expect(report.ok).toBe(false);
-      expect(report.rows.logs.onlyInSql).toEqual([`${G} | u9 | ${TODAY} | push`]);
-      expect(report.rows.logs.onlyInDynamoCount).toBe(0);
+      expect(report.ok).toBe(true);
+      expect(report.rows.logs).toMatchObject({
+        dynamo: 4,
+        sql: 5,
+        missingFromSqlCount: 0,
+        newInSqlCount: 1,
+      });
     });
 
     it('flags a DynamoDB row that could not be copied', async () => {
@@ -240,22 +245,32 @@ describeLocal('DynamoDB -> SQL import and verify', () => {
       );
 
       expect(report.ok).toBe(false);
-      expect(report.rows.logs.onlyInDynamo).toEqual([`${G} | u1 | 2025-02-31 | push`]);
+      expect(report.rows.logs.missingFromSql).toEqual([`${G} | u1 | 2025-02-31 | push`]);
     });
 
-    it('ignores activities that were removed after the switch', async () => {
-      await db.query(
-        `INSERT INTO activities (guild_id, name, display_name, created_by, removed_at)
-         VALUES ($1, 'yoga', 'Yoga', 'u1', now())`,
-        [G],
+    it('flags DynamoDB items it does not understand', async () => {
+      const report = await verifyAgainstLegacy(
+        db,
+        fakeTable([{ PK: 'GUILD#g', SK: 'MYSTERY#1' }]),
+        TODAY,
       );
 
-      const report = await verifyAgainstLegacy(db, fakeTable([activity('Push', '🫸')]), TODAY);
-
-      expect(report.rows.activities).toMatchObject({ dynamo: 1, sql: 1, onlyInSqlCount: 0 });
+      expect(report.ok).toBe(false);
+      expect(report.copy.unrecognised).toEqual(['GUILD#g | MYSTERY#1']);
     });
 
-    it('flags a channel whose panel message differs between the stores', async () => {
+    it('an activity removed since the switch is still accounted for', async () => {
+      const table = fakeTable([activity('Push', '🫸')]);
+      await verifyAgainstLegacy(db, table, TODAY);
+      await db.query(`UPDATE activities SET removed_at = now() WHERE guild_id = $1`, [G]);
+
+      const report = await verifyAgainstLegacy(db, table, TODAY);
+
+      expect(report.ok).toBe(true);
+      expect(report.rows.activities).toMatchObject({ dynamo: 1, sql: 1, missingFromSqlCount: 0 });
+    });
+
+    it('a panel reposted since the switch does not count as a different channel', async () => {
       await db.query(
         `INSERT INTO tracked_channels (guild_id, channel_id, last_panel_message_id)
          VALUES ($1, 'c1', 'newer')`,
@@ -264,9 +279,8 @@ describeLocal('DynamoDB -> SQL import and verify', () => {
 
       const report = await verifyAgainstLegacy(db, fakeTable([channel('c1', 'older')]), TODAY);
 
-      expect(report.ok).toBe(false);
-      expect(report.rows.channels.onlyInDynamo).toEqual([`${G} | c1 | older`]);
-      expect(report.rows.channels.onlyInSql).toEqual([`${G} | c1 | newer`]);
+      expect(report.ok).toBe(true);
+      expect(report.rows.channels).toMatchObject({ dynamo: 1, sql: 1, missingFromSqlCount: 0 });
     });
 
     it('lists users whose derived streak differs from the stored one', async () => {
@@ -279,7 +293,7 @@ describeLocal('DynamoDB -> SQL import and verify', () => {
 
       const report = await verifyAgainstLegacy(db, table, TODAY);
 
-      expect(report.ok).toBe(true); // rows match; streak differences are for a human to read
+      expect(report.ok).toBe(true); // nothing missing; streak differences are for a human to read
       expect(report.streaks.compared).toBe(2);
       expect(report.streaks.differences).toEqual([
         {

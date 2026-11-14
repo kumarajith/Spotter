@@ -3,9 +3,11 @@ import { verifyKey } from 'discord-interactions';
 import { APIInteraction, InteractionType, InteractionResponseType } from 'discord-api-types/v10';
 import { DiscordConfigService } from './common/config/discord-config-service';
 import { createDb } from './db/db';
-import { createRepositories } from './legacy/mirror';
+import { ActivityRepository } from './activity/activity.repository';
 import { ActivityService } from './activity/activity.service';
 import { StreakRepository } from './tracking/streak.repository';
+import { TrackingRepository } from './tracking/tracking.repository';
+import { PanelRepository } from './panel/panel.repository';
 import { PanelService } from './panel/panel.service';
 import { DiscordService } from './discord/discord.service';
 
@@ -18,17 +20,16 @@ function init(): DiscordService {
 
   const discordConfig = new DiscordConfigService();
   const db = createDb();
-  const repositories = createRepositories(db);
 
-  const activityService = new ActivityService(repositories.activities);
-  const panelService = new PanelService(activityService, repositories.panels, discordConfig);
+  const activityService = new ActivityService(new ActivityRepository(db));
+  const panelService = new PanelService(activityService, new PanelRepository(db), discordConfig);
 
   discordService = new DiscordService(
     activityService,
     panelService,
     discordConfig,
     new StreakRepository(db),
-    repositories.tracking,
+    new TrackingRepository(db),
   );
 
   return discordService;

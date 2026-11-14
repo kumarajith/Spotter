@@ -4,16 +4,18 @@
  *   npm run verify -- --env dev
  *   npm run verify -- --env prod
  *
- * The Lambda re-copies DynamoDB -> DSQL, compares both stores row by row, and
- * lists users whose derived streak differs from the one stored before v4.
+ * The app stops writing to DynamoDB at the switch, so the table is a frozen
+ * record of everything up to then. The Lambda re-copies DynamoDB -> DSQL, checks
+ * that nothing DynamoDB holds is missing from DSQL, and lists users whose
+ * derived streak differs from the one stored before v4.
  * Needs the AWS CLI with credentials that may invoke the function.
- * Exits 1 when the stores differ.
+ * Exits 1 when something is missing.
  */
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { RowDifference, VerifyReport } from '../src/legacy/verify';
+import type { RowCheck, VerifyReport } from '../src/legacy/verify';
 
 const REGION = 'ap-south-1';
 
@@ -55,10 +57,10 @@ function invoke(functionName: string): unknown {
   }
 }
 
-function printRows(label: string, diff: RowDifference): void {
+function printRows(label: string, row: RowCheck): void {
   console.log(
-    `  ${label.padEnd(12)}${String(diff.dynamo).padStart(9)}${String(diff.sql).padStart(9)}` +
-      `${String(diff.onlyInDynamoCount).padStart(18)}${String(diff.onlyInSqlCount).padStart(14)}`,
+    `  ${label.padEnd(12)}${String(row.dynamo).padStart(9)}${String(row.sql).padStart(9)}` +
+      `${String(row.missingFromSqlCount).padStart(19)}${String(row.newInSqlCount).padStart(22)}`,
   );
 }
 
@@ -88,14 +90,13 @@ function main(): void {
       `${copy.inserted.channels} channels, ${copy.inserted.bestStreakFloors} best-streak floors`,
   );
 
-  console.log('\nRows                DynamoDB     DSQL  only in DynamoDB  only in DSQL');
+  console.log('\nRows                DynamoDB     DSQL  missing from DSQL  new since the switch');
   printRows('logs', rows.logs);
   printRows('activities', rows.activities);
   printRows('channels', rows.channels);
 
-  for (const [name, diff] of Object.entries(rows)) {
-    printKeys(`${name} only in DynamoDB`, diff.onlyInDynamo, diff.onlyInDynamoCount);
-    printKeys(`${name} only in DSQL`, diff.onlyInSql, diff.onlyInSqlCount);
+  for (const [name, row] of Object.entries(rows)) {
+    printKeys(`${name} in DynamoDB but not in DSQL`, row.missingFromSql, row.missingFromSqlCount);
   }
   printKeys(
     'Logs with a date that is not a real day',
@@ -120,9 +121,9 @@ function main(): void {
   }
 
   if (report.ok) {
-    console.log('\nRESULT: both stores hold the same logs, activities and channels.');
+    console.log('\nRESULT: everything DynamoDB holds is in DSQL.');
   } else {
-    console.log('\nRESULT: the stores differ — see the lists above.');
+    console.log('\nRESULT: DynamoDB holds data that is not in DSQL — see the lists above.');
     process.exit(1);
   }
 }

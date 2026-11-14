@@ -16,8 +16,8 @@ export class DatabaseConstruct extends Construct {
   public readonly endpoint: string;
 
   /**
-   * The pre-v4 DynamoDB table. During the v4 cutover every write is mirrored
-   * into it so it stays a complete copy; it is removed once v4 is confirmed.
+   * The pre-v4 DynamoDB table. The app no longer reads or writes it; it stays
+   * only as the source for the deploy-time import and is removed once v4 is confirmed.
    */
   public readonly table: dynamodb.Table;
 

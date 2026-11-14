@@ -49,7 +49,7 @@ describe('SpotterStack', () => {
     });
   });
 
-  // 1b. DynamoDB table (pre-v4 store, mirrored during the cutover)
+  // 1b. DynamoDB table (pre-v4 store, kept only as the import source)
   describe('DynamoDB', () => {
     test('table has on-demand billing mode', () => {
       template.hasResourceProperties('AWS::DynamoDB::Table', {
@@ -92,16 +92,27 @@ describe('SpotterStack', () => {
   // 3. Lambda functions: API + Scheduler, the data-ops functions, and CDK's own providers
   describe('Lambda', () => {
     test('application, data-ops and CDK provider functions are created', () => {
-      // 2 application + 4 data-ops + log retention provider + deploy trigger provider
-      template.resourceCountIs('AWS::Lambda::Function', 8);
+      // 2 application + 3 data-ops + log retention provider + deploy trigger provider
+      template.resourceCountIs('AWS::Lambda::Function', 7);
+    });
+
+    test('migrate function exists and only knows the DSQL cluster', () => {
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName: 'spotter-test-migrate',
+        Handler: 'handlers/data-ops.migrate',
+        Environment: {
+          Variables: Match.objectLike({
+            DSQL_ENDPOINT: Match.anyValue(),
+            TABLE_NAME: Match.absent(),
+          }),
+        },
+      });
     });
 
     test.each([
-      ['spotter-test-migrate', 'handlers/data-ops.migrate'],
       ['spotter-test-import-legacy', 'handlers/data-ops.importLegacy'],
       ['spotter-test-verify', 'handlers/data-ops.verify'],
-      ['spotter-test-recompute-legacy-streaks', 'handlers/data-ops.recomputeLegacyStreaks'],
-    ])('data-ops function %s exists', (FunctionName, Handler) => {
+    ])('%s reads the old table and writes to DSQL', (FunctionName, Handler) => {
       template.hasResourceProperties('AWS::Lambda::Function', {
         FunctionName,
         Handler,
@@ -112,6 +123,32 @@ describe('SpotterStack', () => {
           }),
         },
       });
+    });
+
+    test('the app Lambdas have no access to DynamoDB', () => {
+      const functions = template.findResources('AWS::Lambda::Function');
+      const policies = template.findResources('AWS::IAM::Policy');
+
+      for (const handler of ['lambda.handler', 'handlers/scheduler.handler']) {
+        const fn = Object.values(functions).find((f) => f.Properties.Handler === handler)!;
+        expect(fn.Properties.Environment.Variables).not.toHaveProperty('TABLE_NAME');
+
+        const roleId = fn.Properties.Role['Fn::GetAtt'][0];
+        const attached = Object.values(policies).filter((p) =>
+          JSON.stringify(p.Properties.Roles).includes(roleId),
+        );
+        expect(attached.length).toBeGreaterThan(0);
+        expect(JSON.stringify(attached)).not.toContain('dynamodb:');
+        expect(JSON.stringify(attached)).toContain('dsql:DbConnectAdmin');
+      }
+    });
+
+    test('nothing can write to the DynamoDB table any more', () => {
+      const policies = JSON.stringify(template.findResources('AWS::IAM::Policy'));
+      for (const action of ['PutItem', 'UpdateItem', 'DeleteItem', 'BatchWriteItem']) {
+        expect(policies).not.toContain(`dynamodb:${action}`);
+      }
+      expect(policies).toContain('dynamodb:Scan');
     });
 
     test('API Lambda exists with correct handler', () => {
@@ -139,7 +176,7 @@ describe('SpotterStack', () => {
             DISCORD_BOT_TOKEN: Match.anyValue(),
             DISCORD_PUBLIC_KEY: Match.anyValue(),
             DISCORD_APPLICATION_ID: Match.anyValue(),
-            TABLE_NAME: Match.anyValue(),
+            DSQL_ENDPOINT: Match.anyValue(),
           }),
         },
       });

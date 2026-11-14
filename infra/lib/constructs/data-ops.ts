@@ -20,15 +20,15 @@ export interface DataOpsConstructProps {
  *
  * A failure before the app Lambdas update fails the deployment, so users never
  * see new code against a database that is not ready. The second import picks up
- * anything the old code wrote to DynamoDB while the deployment was running.
+ * anything the old code wrote to DynamoDB while the deployment was running;
+ * after that the app writes to Aurora DSQL only and the table is frozen.
  *
- * Everything except `migrate` is temporary and goes away with DynamoDB.
+ * Everything except `migrate` is temporary and goes away with the DynamoDB table.
  */
 export class DataOpsConstruct extends Construct {
   public readonly migrate: lambda.Function;
   public readonly importLegacy: lambda.Function;
   public readonly verify: lambda.Function;
-  public readonly recomputeLegacyStreaks: lambda.Function;
 
   constructor(scope: Construct, id: string, props: DataOpsConstructProps) {
     super(scope, id);
@@ -46,29 +46,24 @@ export class DataOpsConstruct extends Construct {
         memorySize: 1024,
         timeout,
         logRetention: logs.RetentionDays.ONE_MONTH,
-        environment: {
-          TABLE_NAME: database.table.tableName,
-          NODE_ENV: environment,
-        },
+        environment: { NODE_ENV: environment },
       });
       database.grantConnect(fn);
       return fn;
     };
 
+    /** The two functions that read the old table get its name and read-only access. */
+    const readsLegacyTable = (fn: lambda.Function) => {
+      fn.addEnvironment('TABLE_NAME', database.table.tableName);
+      database.table.grantReadData(fn);
+      return fn;
+    };
+
     this.migrate = dataOpsFunction('Migrate', 'migrate', 'migrate');
-
-    this.importLegacy = dataOpsFunction('ImportLegacy', 'importLegacy', 'import-legacy');
-    database.table.grantReadData(this.importLegacy);
-
-    this.verify = dataOpsFunction('Verify', 'verify', 'verify');
-    database.table.grantReadData(this.verify);
-
-    this.recomputeLegacyStreaks = dataOpsFunction(
-      'RecomputeLegacyStreaks',
-      'recomputeLegacyStreaks',
-      'recompute-legacy-streaks',
+    this.importLegacy = readsLegacyTable(
+      dataOpsFunction('ImportLegacy', 'importLegacy', 'import-legacy'),
     );
-    database.table.grantReadWriteData(this.recomputeLegacyStreaks);
+    this.verify = readsLegacyTable(dataOpsFunction('Verify', 'verify', 'verify'));
 
     const migrateOnDeploy = new triggers.Trigger(this, 'MigrateOnDeploy', {
       handler: this.migrate,
