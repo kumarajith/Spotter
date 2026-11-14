@@ -86,10 +86,5 @@ export class SpotterStack extends cdk.Stack {
       value: db.endpoint,
       description: 'Aurora DSQL cluster endpoint',
     });
-
-    new cdk.CfnOutput(this, 'TableName', {
-      value: db.table.tableName,
-      description: 'DynamoDB table name (pre-v4 store, read-only source for the import)',
-    });
   }
 }

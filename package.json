@@ -15,7 +15,6 @@
     "local": "tsx scripts/setup-local.ts && tsx --watch scripts/dev-server.ts",
     "dev": "tsx --watch scripts/dev-server.ts",
     "commands:register": "tsx scripts/register-commands.ts",
-    "verify": "tsx scripts/verify.ts",
     "infra:synth:dev": "cd infra && npx cdk synth -c env=dev",
     "infra:synth:prod": "cd infra && npx cdk synth -c env=prod",
     "infra:diff:dev": "cd infra && npx cdk diff -c env=dev",
@@ -24,10 +23,8 @@
     "infra:deploy:prod": "cd infra && npx cdk deploy -c env=prod"
   },
   "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.1009.0",
     "@aws-sdk/credential-providers": "^3.1169.0",
     "@aws-sdk/dsql-signer": "^3.1169.0",
-    "@aws-sdk/lib-dynamodb": "^3.1009.0",
     "@aws/aurora-dsql-node-postgres-connector": "^0.1.9",
     "@discordjs/builders": "^1.13.1",
     "@discordjs/rest": "^2.6.0",
